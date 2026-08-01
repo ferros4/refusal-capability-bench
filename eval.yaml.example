@@ -1,0 +1,36 @@
+# Copy to eval.yaml in the repo root (or pass --config path).
+# CLI flags override these values.
+
+# Prefer host/port (defaults: 127.0.0.1:11434) or set a full base_url.
+host: 127.0.0.1
+port: 11434
+# base_url: http://127.0.0.1:11434/v1   # overrides host/port when set
+
+api_key: ollama
+# model: qwen3.6:35b-a3b-q8_0
+# compare: other-model-name
+
+preset: default
+# datasets: xstest,gsm8k,mmlu   # overrides preset lists when set
+
+limit: 50
+dataset_limit: 100
+seed: 42
+workers: 1
+
+judge: heuristic
+# judge: llm
+# judge_base_url: http://127.0.0.1:11434/v1
+# judge_model: qwen3.6:35b-a3b-q8_0
+
+cache_dir: cache/prompts
+# no_cache: false
+# refresh_cache: false
+
+report: true
+# skip_hf_check: false
+continue_on_error: false
+
+temperature: 0.0
+max_tokens: 1024
+timeout: 300

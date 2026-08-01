@@ -1,0 +1,161 @@
+ # Dataset + suite catalog
+# Recommended: python run_eval.py --list-presets
+#              python run_eval.py --list-datasets
+# Loaders: harness/refusal_datasets.py , harness/presets.py
+
+# Suite presets (refusal + capability). Prefer --preset <name>.
+# Source of truth: harness/presets.py (this file is documentation only).
+# An empty list means that suite is intentionally skipped.
+suite_presets:
+  default:
+    refusal: [cyber-overrefusal, generic-compliance]
+    capability: [gsm8k, mmlu, humaneval]
+  quick:
+    refusal: [cyber-overrefusal, generic-compliance, xstest, donotanswer, advbench]
+    capability: [gsm8k, mmlu, humaneval]
+  compare:
+    note: same as quick; intended for --compare base vs uncensored
+    refusal: [cyber-overrefusal, generic-compliance, xstest, donotanswer, advbench]
+    capability: [gsm8k, mmlu, humaneval]
+  overrefusal:
+    refusal: [cyber-overrefusal, generic-compliance, xstest, orbench, wildchat-over-refusal, coconot]
+    capability: [gsm8k, mmlu, humaneval]
+  should-refuse:
+    refusal: [donotanswer, advbench, harmbench, strongreject, sorrybench, harmfulqa, llm-lat-harmful]
+    capability: [gsm8k, mmlu, humaneval]
+  cyber:
+    refusal: [cyber-overrefusal, cyber-code-vuln, generic-compliance]
+    capability: [gsm8k, mmlu, humaneval]
+  # refusal-only: runs default refusal pack; capability is empty on purpose
+  refusal-only:
+    refusal: [cyber-overrefusal, generic-compliance]
+    capability: []
+  # capability-only: runs core benches; refusal is empty on purpose
+  capability-only:
+    refusal: []
+    capability: [gsm8k, mmlu, humaneval]
+  capability-smoke:
+    refusal: []
+    capability: [gsm8k, mmlu, humaneval]
+    note: same datasets as capability-only; use a small --limit
+  mentioned:
+    note: broad recommendation list — see harness/presets.py / refusal_datasets PRESETS["mentioned"]
+    capability: [gsm8k, mmlu, humaneval]
+  full:
+    note: all registered refusal datasets + core capability
+    capability: [gsm8k, mmlu, humaneval]
+  all:
+    note: alias of full
+
+capability_datasets: [gsm8k, mmlu, humaneval]
+
+datasets:
+  # Builtins
+  - id: cyber-overrefusal
+    expected: over_refuse
+  - id: generic-compliance
+    expected: over_refuse
+
+  # Over-refusal
+  - id: xstest
+    hf: walledai/XSTest
+    gated: true
+    expected: mixed
+  - id: xstest-paul
+    hf: Paul/XSTest
+    gated: false
+    expected: mixed
+  - id: orbench
+    hf: bench-llm/or-bench@or-bench-hard-1k
+    expected: over_refuse
+  - id: orbench-toxic
+    hf: bench-llm/or-bench@or-bench-toxic
+    expected: should_refuse
+  - id: wildchat-over-refusal
+    hf: justinphan3110/wildchat_over_refusal
+    expected: over_refuse
+  - id: coconot
+    hf: allenai/coconot@original
+    expected: mixed
+  - id: coconot-contrast
+    hf: allenai/coconot@contrast
+    expected: mixed
+
+  # Should-refuse / safety
+  - id: sorrybench
+    hf: sorry-bench/sorry-bench-202406
+    gated: true
+    expected: should_refuse
+  - id: advbench
+    hf: walledai/AdvBench
+    gated: true
+    expected: should_refuse
+  - id: harmbench
+    hf: walledai/HarmBench@standard
+    gated: true
+    expected: should_refuse
+  - id: harmbench-contextual
+    hf: walledai/HarmBench@contextual
+    gated: true
+    expected: should_refuse
+  - id: strongreject
+    hf: walledai/StrongREJECT
+    gated: true
+    expected: should_refuse
+  - id: toxicchat
+    hf: lmsys/toxic-chat@toxicchat0124
+    expected: mixed
+  - id: beavertails
+    hf: PKU-Alignment/BeaverTails
+    expected: mixed
+  - id: donotanswer
+    hf: LibrAI/do-not-answer
+    expected: should_refuse
+  - id: safetybench
+    hf: thu-coai/SafetyBench@test/en
+    expected: mixed
+  - id: harmfulqa
+    hf: declare-lab/HarmfulQA
+    expected: should_refuse
+  - id: jbb
+    hf: walledai/JailbreakBench
+    expected: mixed
+  - id: jbb-behaviors
+    hf: JailbreakBench/JBB-Behaviors@behaviors
+    expected: mixed
+  - id: wildjailbreak
+    hf: allenai/wildjailbreak@eval
+    gated: true
+    expected: mixed
+  - id: in-the-wild-jailbreak
+    hf: TrustAIRLab/in-the-wild-jailbreak-prompts
+    expected: should_refuse
+  - id: aegis
+    hf: nvidia/Aegis-AI-Content-Safety-Dataset-2.0
+    expected: mixed
+  - id: llm-lat-harmful
+    hf: LLM-LAT/harmful-dataset
+    expected: should_refuse
+
+  # Cyber-adjacent
+  - id: cyber-code-vuln
+    hf: CyberNative/Code_Vulnerability_Security_DPO
+    expected: over_refuse
+  - id: abliterate-refusal
+    hf: byroneverson/abliterate-refusal
+    expected: should_refuse
+  - id: mrfakename-refusal
+    hf: mrfakename/refusal
+    expected: mixed
+  - id: mrfakename-refusal-xl
+    hf: mrfakename/refusal-xl
+    expected: mixed
+
+# Gated URLs (request access while logged into HF):
+gated_urls:
+  - https://huggingface.co/datasets/walledai/XSTest
+  - https://huggingface.co/datasets/walledai/AdvBench
+  - https://huggingface.co/datasets/walledai/HarmBench
+  - https://huggingface.co/datasets/walledai/StrongREJECT
+  - https://huggingface.co/datasets/sorry-bench/sorry-bench-202406
+  - https://huggingface.co/datasets/allenai/wildjailbreak
