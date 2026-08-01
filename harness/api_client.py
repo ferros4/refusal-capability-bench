@@ -21,6 +21,9 @@ warnings.filterwarnings("ignore", category=Warning, module="urllib3")
 # Generic local defaults (Ollama). No machine-specific hosts.
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 11434
+RETRYABLE_STATUS_CODES = frozenset({502, 503})
+RETRY_SLEEP_S = 5.0
+DEFAULT_MAX_RETRIES = 10
 
 
 def resolve_base_url(
@@ -100,11 +103,15 @@ class ChatClient:
         api_key: str = "ollama",
         timeout: float = 300.0,
         verify: bool = False,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        retry_sleep_s: float = RETRY_SLEEP_S,
     ):
         if not base_url or not str(base_url).strip():
             raise ValueError("base_url is required (e.g. http://127.0.0.1:11434/v1)")
         self.base_url = str(base_url).rstrip("/")
         self.model = model
+        self.max_retries = max(0, int(max_retries))
+        self.retry_sleep_s = float(retry_sleep_s)
         self.client = httpx.Client(
             base_url=self.base_url,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -125,28 +132,38 @@ class ChatClient:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": user})
         prompt_blob = (system + "\n" if system else "") + user
+        payload = {
+            "model": model or self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
         started = time.perf_counter()
-        try:
-            response = self.client.post(
-                "/chat/completions",
-                json={
-                    "model": model or self.model,
-                    "messages": messages,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                },
-            )
-        except httpx.ConnectError as exc:
-            msg = str(exc)
-            if "WRONG_VERSION_NUMBER" in msg or "SSL" in msg:
-                raise ConnectionError(
-                    f"{exc}\nHint: API base is {self.base_url!r}. "
-                    "WRONG_VERSION_NUMBER usually means you used https:// against an HTTP server. "
-                    "Try --base-url http://HOST:PORT/v1 or --host/--port"
-                ) from exc
-            raise
+        attempt = 0
+        while True:
+            try:
+                response = self.client.post("/chat/completions", json=payload)
+            except httpx.ConnectError as exc:
+                msg = str(exc)
+                if "WRONG_VERSION_NUMBER" in msg or "SSL" in msg:
+                    raise ConnectionError(
+                        f"{exc}\nHint: API base is {self.base_url!r}. "
+                        "WRONG_VERSION_NUMBER usually means you used https:// against an HTTP server. "
+                        "Try --base-url http://HOST:PORT/v1 or --host/--port"
+                    ) from exc
+                raise
+
+            if response.status_code in RETRYABLE_STATUS_CODES:
+                if attempt >= self.max_retries:
+                    response.raise_for_status()
+                attempt += 1
+                time.sleep(self.retry_sleep_s)
+                continue
+
+            response.raise_for_status()
+            break
+
         latency = time.perf_counter() - started
-        response.raise_for_status()
         data = response.json()
         content = data["choices"][0]["message"]["content"] or ""
         prompt_tokens, completion_tokens, total_tokens, estimated = parse_usage(

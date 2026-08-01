@@ -144,3 +144,74 @@ def test_other_connect_error_passthrough():
         client = ChatClient(base_url="http://x/v1", model="m")
         with pytest.raises(httpx.ConnectError, match="connection refused"):
             client.chat("q")
+
+
+def _http_response(status_code: int, content: str = "ok") -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = status_code
+    if status_code >= 400:
+        resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            f"{status_code}",
+            request=MagicMock(),
+            response=resp,
+        )
+    else:
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = {
+            "choices": [{"message": {"content": content}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    return resp
+
+
+def test_chat_retries_502_then_succeeds():
+    mock_http = MagicMock()
+    mock_http.post.side_effect = [
+        _http_response(502),
+        _http_response(503),
+        _http_response(200, "recovered"),
+    ]
+
+    with (
+        patch("harness.api_client.httpx.Client", return_value=mock_http),
+        patch("harness.api_client.time.sleep") as sleep,
+    ):
+        client = ChatClient(base_url="http://x/v1", model="m", retry_sleep_s=5.0)
+        out = client.chat("q")
+        assert out.content == "recovered"
+        assert mock_http.post.call_count == 3
+        assert sleep.call_count == 2
+        sleep.assert_called_with(5.0)
+
+
+def test_chat_retries_exhausted_raises():
+    mock_http = MagicMock()
+    mock_http.post.return_value = _http_response(503)
+
+    with (
+        patch("harness.api_client.httpx.Client", return_value=mock_http),
+        patch("harness.api_client.time.sleep") as sleep,
+    ):
+        client = ChatClient(
+            base_url="http://x/v1", model="m", max_retries=2, retry_sleep_s=5.0
+        )
+        with pytest.raises(httpx.HTTPStatusError):
+            client.chat("q")
+        # initial try + 2 retries = 3 posts; sleep between retries only
+        assert mock_http.post.call_count == 3
+        assert sleep.call_count == 2
+
+
+def test_chat_does_not_retry_other_http_errors():
+    mock_http = MagicMock()
+    mock_http.post.return_value = _http_response(400)
+
+    with (
+        patch("harness.api_client.httpx.Client", return_value=mock_http),
+        patch("harness.api_client.time.sleep") as sleep,
+    ):
+        client = ChatClient(base_url="http://x/v1", model="m")
+        with pytest.raises(httpx.HTTPStatusError):
+            client.chat("q")
+        assert mock_http.post.call_count == 1
+        sleep.assert_not_called()
