@@ -12,14 +12,20 @@ from typing import Any
 from harness.refusal_datasets import PRESETS as REFUSAL_BUNDLES
 from harness.refusal_datasets import REGISTRY as REFUSAL_REGISTRY
 
-CAPABILITY_DATASETS = ("gsm8k", "mmlu", "humaneval")
+# Core capability pack used by most suite presets
+CAPABILITY_CORE = ("gsm8k", "mmlu", "humaneval")
+# Chat-only coding benches (local unit tests; no tool/function calling)
+CODING_DATASETS = ("humaneval", "mbpp", "humanevalplus")
+# All known capability dataset ids (classification + --list-datasets)
+CAPABILITY_DATASETS = ("gsm8k", "mmlu", "humaneval", "mbpp", "humanevalplus")
 
 CAPABILITY_INFO: dict[str, str] = {
     "gsm8k": "Grade-school math (exact numeric match)",
     "mmlu": "Multiple-choice academic knowledge",
-    "humaneval": "Python coding (unit tests)",
+    "humaneval": "Python function completion (HumanEval unit tests; chat-only)",
+    "mbpp": "Mostly Basic Python Problems (assert tests; chat-only)",
+    "humanevalplus": "HumanEval+ stronger tests via EvalPlus (chat-only)",
 }
-
 
 @dataclass(frozen=True)
 class SuitePreset:
@@ -35,7 +41,7 @@ def _p(
     id: str,
     description: str,
     refusal: list[str] | tuple[str, ...],
-    capability: list[str] | tuple[str, ...] = ("gsm8k", "mmlu", "humaneval"),
+    capability: list[str] | tuple[str, ...] = CAPABILITY_CORE,
     recommended: bool = False,
 ) -> SuitePreset:
     return SuitePreset(
@@ -53,49 +59,49 @@ SUITE_PRESETS: dict[str, SuitePreset] = {
         "default",
         "Recommended start: cyber over-refusal + benign control + core capability (GSM8K/MMLU/HumanEval)",
         refusal=REFUSAL_BUNDLES["default"],
-        capability=list(CAPABILITY_DATASETS),
+        capability=list(CAPABILITY_CORE),
         recommended=True,
     ),
     "quick": _p(
         "quick",
         "Faster smoke: default refusal plus XSTest/Do-Not-Answer/AdvBench + core capability",
         refusal=REFUSAL_BUNDLES["quick"],
-        capability=list(CAPABILITY_DATASETS),
+        capability=list(CAPABILITY_CORE),
         recommended=True,
     ),
     "compare": _p(
         "compare",
         "Good base-vs-uncensored compare pack (quick refusal + capability)",
         refusal=REFUSAL_BUNDLES["quick"],
-        capability=list(CAPABILITY_DATASETS),
+        capability=list(CAPABILITY_CORE),
         recommended=True,
     ),
     "overrefusal": _p(
         "overrefusal",
         "Measure false refusals (benign/security education) + core capability",
         refusal=REFUSAL_BUNDLES["overrefusal"],
-        capability=list(CAPABILITY_DATASETS),
+        capability=list(CAPABILITY_CORE),
         recommended=True,
     ),
     "should-refuse": _p(
         "should-refuse",
         "Measure remaining safety refusals on harmful prompts + core capability",
         refusal=REFUSAL_BUNDLES["should-refuse"],
-        capability=list(CAPABILITY_DATASETS),
+        capability=list(CAPABILITY_CORE),
         recommended=True,
     ),
     "cyber": _p(
         "cyber",
         "Cyber-focused over-refusal + code-vuln discussion + core capability",
         refusal=REFUSAL_BUNDLES["cyber"],
-        capability=list(CAPABILITY_DATASETS),
+        capability=list(CAPABILITY_CORE),
         recommended=True,
     ),
     "mentioned": _p(
         "mentioned",
         "Full documentation recommendation list (broad refusal) + core capability",
         refusal=REFUSAL_BUNDLES["mentioned"],
-        capability=list(CAPABILITY_DATASETS),
+        capability=list(CAPABILITY_CORE),
         recommended=False,
     ),
     "full": _p(
@@ -123,18 +129,31 @@ SUITE_PRESETS: dict[str, SuitePreset] = {
         "capability-only",
         "Core capability benches only (no refusal)",
         refusal=(),
-        capability=list(CAPABILITY_DATASETS),
+        capability=list(CAPABILITY_CORE),
         recommended=True,
     ),
     "capability-smoke": _p(
         "capability-smoke",
         "Capability only, intended with a small --limit",
         refusal=(),
-        capability=list(CAPABILITY_DATASETS),
+        capability=list(CAPABILITY_CORE),
+        recommended=False,
+    ),
+    "coding": _p(
+        "coding",
+        "Chat-only coding suite: HumanEval, MBPP, HumanEval+ (local unit tests; no tools)",
+        refusal=(),
+        capability=list(CODING_DATASETS),
+        recommended=True,
+    ),
+    "coding-smoke": _p(
+        "coding-smoke",
+        "Coding only, intended with a small --limit (chat-only, no tools)",
+        refusal=(),
+        capability=list(CODING_DATASETS),
         recommended=False,
     ),
 }
-
 
 @dataclass
 class ResolvedSuite:
@@ -266,7 +285,7 @@ def resolve_suite(
             base = ResolvedSuite(
                 preset_id=preset_id,
                 refusal=list(REFUSAL_BUNDLES[preset_id]),
-                capability=list(CAPABILITY_DATASETS),
+                capability=list(CAPABILITY_CORE),
                 description=f"Legacy refusal bundle '{preset_id}' + core capability",
             )
         else:

@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-Capability retention eval: GSM8K, HumanEval, MMLU slice.
+Capability retention eval: GSM8K, MMLU, and chat-only coding benches.
+
+Coding benches (HumanEval, HumanEval+, MBPP) use plain chat completions — no
+tool/function calling. Solutions are scored by local unit-test execution.
 
 Compares one or two models on the same fixed samples via OpenAI-compatible API.
 
 Examples:
   python capability_eval.py --model qwen3.6:35b-a3b-q8_0 --benches gsm8k,mmlu,humaneval --limit 50
+  python capability_eval.py --model m --benches humaneval,mbpp,humanevalplus --limit 50
   python capability_eval.py --model base-name --compare uncensored-name --benches gsm8k,mmlu --limit 100
-  python capability_eval.py --model my-model --benches gsm8k --limit 20 --out results/cap_base
 """
 
 from __future__ import annotations
@@ -178,25 +181,8 @@ def extract_python_code(text: str, prompt: str) -> str:
     return prompt + completion.rstrip() + "\n"
 
 
-def run_humaneval_check(
-    code: str, test: str, entry_point: str, timeout_s: float = 5.0
-) -> tuple[bool, str]:
-    """Execute HumanEval-style check(candidate) in a subprocess."""
-    code = _normalize_module_code(code) if _looks_like_full_definition(code.lstrip()) else code
-    if not code.endswith("\n"):
-        code += "\n"
-    test = test.replace("\r\n", "\n").rstrip() + "\n"
-    program = (
-        "import sys\n"
-        f"{code}\n"
-        f"{test}\n"
-        "try:\n"
-        f"    check({entry_point})\n"
-        "except Exception as exc:\n"
-        "    print(type(exc).__name__ + ': ' + str(exc), file=sys.stderr)\n"
-        "    sys.exit(1)\n"
-        "sys.exit(0)\n"
-    )
+def _run_python_program(program: str, timeout_s: float = 5.0) -> tuple[bool, str]:
+    """Parse and execute a Python program in a subprocess (no network/tools)."""
     try:
         ast.parse(program)
     except SyntaxError as exc:
@@ -223,6 +209,76 @@ def run_humaneval_check(
     finally:
         Path(path).unlink(missing_ok=True)
 
+
+def run_humaneval_check(
+    code: str, test: str, entry_point: str, timeout_s: float = 5.0
+) -> tuple[bool, str]:
+    """Execute HumanEval-style check(candidate) in a subprocess."""
+    code = (
+        _normalize_module_code(code)
+        if _looks_like_full_definition(code.lstrip())
+        else code
+    )
+    if not code.endswith("\n"):
+        code += "\n"
+    test = test.replace("\r\n", "\n").rstrip() + "\n"
+    program = (
+        "import sys\n"
+        f"{code}\n"
+        f"{test}\n"
+        "try:\n"
+        f"    check({entry_point})\n"
+        "except Exception as exc:\n"
+        "    print(type(exc).__name__ + ': ' + str(exc), file=sys.stderr)\n"
+        "    sys.exit(1)\n"
+        "sys.exit(0)\n"
+    )
+    return _run_python_program(program, timeout_s=timeout_s)
+
+
+def extract_mbpp_code(text: str) -> str:
+    """Extract a standalone Python solution from a chat reply (MBPP-style)."""
+    text = re.sub(r"<think>.*?</think>", " ", text, flags=re.I | re.S)
+    text = text.replace("\r\n", "\n")
+    fences = CODE_FENCE_RE.findall(text)
+    if fences:
+        return _normalize_module_code(max(fences, key=len))
+    def_match = re.search(r"(?m)^(async\s+)?def\s+\w+", text)
+    if def_match:
+        return _normalize_module_code(text[def_match.start() :])
+    return _normalize_module_code(text)
+
+
+def run_mbpp_check(
+    code: str,
+    test_list: list[str],
+    test_setup: str = "",
+    timeout_s: float = 5.0,
+) -> tuple[bool, str]:
+    """Execute MBPP assert-list tests against model code in a subprocess."""
+    code = _normalize_module_code(code)
+    setup = (test_setup or "").replace("\r\n", "\n").rstrip()
+    if setup:
+        setup += "\n"
+    asserts = "\n".join(str(item).rstrip() for item in test_list if str(item).strip())
+    if not asserts:
+        return False, "No tests"
+    program = (
+        "import sys\n"
+        f"{setup}"
+        f"{code}\n"
+        "try:\n"
+        + textwrap.indent(asserts + "\n", "    ")
+        + "except Exception as exc:\n"
+        "    print(type(exc).__name__ + ': ' + str(exc), file=sys.stderr)\n"
+        "    sys.exit(1)\n"
+        "sys.exit(0)\n"
+    )
+    return _run_python_program(program, timeout_s=timeout_s)
+
+
+# Benches that return code via chat and are scored by local execution (no tools).
+CODING_BENCHES = frozenset({"humaneval", "humanevalplus", "mbpp"})
 
 # ---------------------------------------------------------------------------
 # Dataset loaders
@@ -342,9 +398,20 @@ def load_mmlu(limit: int | None, seed: int, subjects: list[str] | None) -> list[
     return out
 
 
-def load_humaneval(limit: int | None, seed: int) -> list[Sample]:
+def _load_humaneval_family(
+    *,
+    bench: str,
+    dataset: str,
+    limit: int | None,
+    seed: int,
+    config: str | None = None,
+) -> list[Sample]:
+    """HumanEval / HumanEval+ style: complete a function prompt, score via check()."""
     load_dataset = _require_datasets()
-    ds = load_dataset("openai/openai_humaneval", split="test")
+    if config:
+        ds = load_dataset(dataset, config, split="test")
+    else:
+        ds = load_dataset(dataset, split="test")
     idxs = list(range(len(ds)))
     rng = random.Random(seed)
     rng.shuffle(idxs)
@@ -356,12 +423,12 @@ def load_humaneval(limit: int | None, seed: int) -> list[Sample]:
         prompt = row["prompt"]
         user = (
             "Complete the following Python function. "
-            "Return only the full function code (no explanation).\n\n"
-            f"{prompt }"
+            "Return only the full function code (no explanation, no tools).\n\n"
+            f"{prompt}"
         )
         out.append(
             Sample(
-                "humaneval",
+                bench,
                 str(row["task_id"]),
                 user,
                 {
@@ -369,19 +436,115 @@ def load_humaneval(limit: int | None, seed: int) -> list[Sample]:
                     "test": row["test"],
                     "entry_point": row["entry_point"],
                 },
-                {"entry_point": row["entry_point"]},
+                {"entry_point": row["entry_point"], "dataset": dataset},
             )
         )
     return out
 
 
-LOADERS: dict[str, Callable[..., list[Sample]]] = {
-    "gsm8k": load_gsm8k,
-    "mmlu": load_mmlu,
-    "humaneval": load_humaneval,
-}
+def load_humaneval(limit: int | None, seed: int) -> list[Sample]:
+    return _load_humaneval_family(
+        bench="humaneval",
+        dataset="openai/openai_humaneval",
+        limit=limit,
+        seed=seed,
+    )
 
 
+def load_humanevalplus(limit: int | None, seed: int) -> list[Sample]:
+    """EvalPlus HumanEval+ — same prompts, stronger unit tests (chat completion only)."""
+    return _load_humaneval_family(
+        bench="humanevalplus",
+        dataset="evalplus/humanevalplus",
+        limit=limit,
+        seed=seed,
+    )
+
+
+def load_mbpp(limit: int | None, seed: int) -> list[Sample]:
+    """
+    MBPP sanitized — natural-language → Python, scored with assert lists.
+    Chat completion only (no tool calling).
+    """
+    load_dataset = _require_datasets()
+    ds = None
+    for spec in (
+        ("google-research-datasets/mbpp", "sanitized"),
+        ("mbpp", "sanitized"),
+        ("google-research-datasets/mbpp", None),
+        ("mbpp", None),
+    ):
+        name, config = spec
+        try:
+            ds = (
+                load_dataset(name, config, split="test")
+                if config
+                else load_dataset(name, split="test")
+            )
+            break
+        except Exception:
+            continue
+    if ds is None:
+        raise SystemExit(
+            "Failed to load MBPP (tried google-research-datasets/mbpp and mbpp)"
+        )
+
+    idxs = list(range(len(ds)))
+    rng = random.Random(seed)
+    rng.shuffle(idxs)
+    if limit is not None:
+        idxs = idxs[:limit]
+
+    out: list[Sample] = []
+    for index in idxs:
+        row = ds[int(index)]
+        text = str(row.get("prompt") or row.get("text") or "").strip()
+        test_list = row.get("test_list") or []
+        if isinstance(test_list, str):
+            test_list = ast.literal_eval(test_list)
+        test_list = [str(item) for item in test_list]
+        setup = str(
+            row.get("test_setup_code")
+            or row.get("test_setup")
+            or "\n".join(row.get("test_imports") or [])
+            or ""
+        )
+        task_id = row.get("task_id", index)
+        user = (
+            "Write a Python solution for the problem below. "
+            "Return only executable Python code (no explanation, no tools).\n\n"
+            f"{text}"
+        )
+        out.append(
+            Sample(
+                "mbpp",
+                f"mbpp-{task_id}",
+                user,
+                {"test_list": test_list, "setup": setup, "text": text},
+                {"task_id": task_id},
+            )
+        )
+    if not out:
+        raise SystemExit("Failed to load any MBPP samples")
+    return out
+
+
+KNOWN_BENCHES = ("gsm8k", "mmlu", "humaneval", "humanevalplus", "mbpp")
+
+
+def _resolve_loader(name: str) -> Callable[..., list[Sample]]:
+    """Late-bind loaders so tests can patch load_* functions."""
+    loaders: dict[str, Callable[..., list[Sample]]] = {
+        "gsm8k": load_gsm8k,
+        "mmlu": load_mmlu,
+        "humaneval": load_humaneval,
+        "humanevalplus": load_humanevalplus,
+        "mbpp": load_mbpp,
+    }
+    try:
+        return loaders[name]
+    except KeyError as exc:
+        raise KeyError(name) from exc
 # ---------------------------------------------------------------------------
 # Eval loop
 # ---------------------------------------------------------------------------
@@ -416,15 +579,23 @@ def score_trial(sample: Sample, response: str) -> tuple[bool, str, str]:
         gold_letter = chr(ord("A") + int(sample.gold))
         ok = letter == gold_letter
         return ok, letter, gold_letter
-    if sample.bench == "humaneval":
+    if sample.bench in ("humaneval", "humanevalplus"):
         gold_payload = sample.gold
         code = extract_python_code(response, gold_payload["prompt"])
         ok, err = run_humaneval_check(
             code, gold_payload["test"], gold_payload["entry_point"]
         )
-        return ok, ("pass" if ok else f"fail:{err [:120 ]}"), "pass"
+        return ok, ("pass" if ok else f"fail:{err[:120]}"), "pass"
+    if sample.bench == "mbpp":
+        gold_payload = sample.gold
+        code = extract_mbpp_code(response)
+        ok, err = run_mbpp_check(
+            code,
+            gold_payload["test_list"],
+            test_setup=str(gold_payload.get("setup") or ""),
+        )
+        return ok, ("pass" if ok else f"fail:{err[:120]}"), "pass"
     raise ValueError(sample.bench)
-
 
 def _stopped_trial(sample: Sample, model: str) -> Trial:
     gold = str(sample.gold if not isinstance(sample.gold, dict) else "pass")
@@ -462,7 +633,7 @@ def _eval_one_capability(
     tokens_estimated = False
     try:
         mt = max_tokens
-        if text.bench == "humaneval":
+        if text.bench in CODING_BENCHES:
             mt = max(max_tokens, 1024)
         chat = client.chat(
             text.prompt, temperature=temperature, max_tokens=mt, model=model
@@ -683,7 +854,10 @@ def write_outputs(out_dir: Path, trials: list[Trial], summary: dict[str, Any]) -
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Capability eval (GSM8K / MMLU / HumanEval)"
+        description=(
+            "Capability eval (GSM8K / MMLU / coding: HumanEval, HumanEval+, MBPP). "
+            "Coding benches are chat-only — no tool calling."
+        )
     )
     parser.add_argument(
         "--base-url",
@@ -709,7 +883,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--benches",
         default="gsm8k,mmlu,humaneval",
-        help="Comma list: gsm8k,mmlu,humaneval",
+        help=f"Comma list from: {', '.join(KNOWN_BENCHES)}",
     )
     parser.add_argument(
         "--limit", type=int, default=50, help="Max samples per bench (default 50)"
@@ -739,9 +913,11 @@ def main(argv: list[str] | None = None) -> int:
         for bench_name in args.benches.split(",")
         if bench_name.strip()
     ]
-    unknown = [bench_name for bench_name in bench_names if bench_name not in LOADERS]
+    unknown = [bench_name for bench_name in bench_names if bench_name not in KNOWN_BENCHES]
     if unknown:
-        raise SystemExit(f"Unknown benches: {unknown }. Choose from {list (LOADERS )}")
+        raise SystemExit(
+            f"Unknown benches: {unknown}. Choose from {list(KNOWN_BENCHES)}"
+        )
 
     subjects = None
     if args.mmlu_subjects:
@@ -751,14 +927,13 @@ def main(argv: list[str] | None = None) -> int:
 
     samples: list[Sample] = []
     for bench_name in bench_names:
+        loader = _resolve_loader(bench_name)
         if bench_name == "mmlu":
-            samples.extend(load_mmlu(args.limit, args.seed, subjects))
-        elif bench_name == "gsm8k":
-            samples.extend(load_gsm8k(args.limit, args.seed))
-        elif bench_name == "humaneval":
-            samples.extend(load_humaneval(args.limit, args.seed))
+            samples.extend(loader(args.limit, args.seed, subjects))
+        else:
+            samples.extend(loader(args.limit, args.seed))
 
-            # stable order: bench then id
+    # stable order: bench then id
     samples.sort(key=lambda text: (text.bench, text.sample_id))
 
     models = [args.model]

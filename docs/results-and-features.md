@@ -161,6 +161,21 @@ Default when host/port omitted: `http://127.0.0.1:11434/v1`
 
 ---
 
+## Coding benches
+
+Preset `coding` (or `--datasets humaneval,mbpp,humanevalplus`) runs chat-only code
+completion. The API request is a normal `/chat/completions` with user/system messages
+only — **no tools / function calling**. Replies are scored by extracting Python and
+running unit tests in a local subprocess (sandbox untrusted models).
+
+| Bench | Role |
+|-------|------|
+| `humaneval` | Classic function completion |
+| `mbpp` | NL problem → Python + assert list |
+| `humanevalplus` | Same prompts as HumanEval, stronger tests |
+
+---
+
 ## Interpreting uncensor compares
 
 | Signal | Healthy uncensor |

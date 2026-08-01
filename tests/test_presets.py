@@ -33,7 +33,7 @@ def test_resolve_default_when_omitted():
     suite = presets.resolve_suite(preset=None, datasets=None)
     assert suite.preset_id == "default"
     assert suite.refusal == list(REFUSAL_BUNDLES["default"])
-    assert list(suite.capability) == list(presets.CAPABILITY_DATASETS)
+    assert list(suite.capability) == list(presets.CAPABILITY_CORE)
     assert suite.only == "all"
 
 
@@ -49,8 +49,23 @@ def test_resolve_preset_capability_only():
     """refusal is empty on purpose; capability is the core three benches."""
     suite = presets.resolve_suite(preset="capability-only", datasets=None)
     assert suite.refusal == []
-    assert suite.capability == ["gsm8k", "mmlu", "humaneval"]
+    assert suite.capability == list(presets.CAPABILITY_CORE)
     assert suite.only == "capability"
+
+
+def test_resolve_preset_coding():
+    suite = presets.resolve_suite(preset="coding", datasets=None)
+    assert suite.refusal == []
+    assert suite.capability == list(presets.CODING_DATASETS)
+    assert suite.only == "capability"
+    assert "mbpp" in suite.capability
+    assert "humanevalplus" in suite.capability
+
+
+def test_coding_datasets_are_capability():
+    for dataset_id in presets.CODING_DATASETS:
+        assert presets.classify_dataset_token(dataset_id) == "capability"
+    assert set(presets.CODING_DATASETS) <= set(presets.CAPABILITY_DATASETS)
 
 
 def test_resolve_capability_smoke_same_datasets_as_capability_only():
@@ -108,10 +123,18 @@ def test_catalog_yaml_documents_single_suite_presets():
     assert sp["capability-only"]["refusal"] == []
     assert sp["capability-only"]["capability"] == ["gsm8k", "mmlu", "humaneval"]
 
+    assert sp["coding"]["refusal"] == []
+    assert sp["coding"]["capability"] == ["humaneval", "mbpp", "humanevalplus"]
+    assert catalog["coding_datasets"] == ["humaneval", "mbpp", "humanevalplus"]
+    assert "mbpp" in catalog["capability_datasets"]
+    assert "humanevalplus" in catalog["capability_datasets"]
+
     # Code and catalog agree on the intentional empty-side presets
     code_ref = presets.resolve_suite(preset="refusal-only", datasets=None)
     code_cap = presets.resolve_suite(preset="capability-only", datasets=None)
+    code_coding = presets.resolve_suite(preset="coding", datasets=None)
     assert code_ref.refusal == sp["refusal-only"]["refusal"]
     assert code_ref.capability == sp["refusal-only"]["capability"]
     assert code_cap.refusal == sp["capability-only"]["refusal"]
     assert code_cap.capability == sp["capability-only"]["capability"]
+    assert code_coding.capability == sp["coding"]["capability"]
