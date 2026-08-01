@@ -29,7 +29,7 @@ cache/prompts/
   <dataset>_<hash>.meta.json
 ```
 
-With `--compare`, refusal folders nest per model:
+With `--compare`, the top folder is `<model>_vs_<compare>`, and refusal folders nest per model:
 
 ```text
 results/<model>_vs_<compare>/<timestamp>/
@@ -38,6 +38,16 @@ results/<model>_vs_<compare>/<timestamp>/
     base_cyber/<compare_slug>/
   capability/                  # both models + delta_compare_minus_base
 ```
+
+Refusal dataset → folder aliases (under `refusal/`):
+
+| Dataset id | Folder |
+|------------|--------|
+| `cyber-overrefusal` | `base_cyber` |
+| `generic-compliance` | `generic_compliance` |
+| other registry ids | slugified id (e.g. `xstest`, `mrfakename_refusal`) |
+
+Standalone `python -m harness.refusal_eval` / `capability_eval` write to whatever path you pass as `--out` (no automatic nesting).
 
 ---
 

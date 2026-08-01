@@ -10,9 +10,9 @@ uv.lock                     # locked dependencies (uv)
 requirements.txt            # optional pip export from uv
 harness/
   api_client.py             # OpenAI-compatible HTTP client
-  presets.py                # suite presets
-  refusal_datasets.py       # refusal dataset registry
-  refusal_eval.py           # refusal runner
+  presets.py                # suite presets (source of truth)
+  refusal_datasets.py       # refusal dataset registry + bundles
+  refusal_eval.py           # refusal runner (standalone OK)
   capability_eval.py        # GSM8K / MMLU / HumanEval
   metrics.py                # timing / tokens-per-sec
   prompt_cache.py           # seeded prompt snapshots
@@ -22,9 +22,11 @@ harness/
   safety.py                 # research-use notice
 tests/                      # unit + integration
 docs/                       # extended documentation
-datasets_catalog.yaml       # human-readable catalog (docs only)
+datasets_catalog.yaml       # catalog mirror (docs only; not loaded at runtime)
 cache/prompts/              # runtime prompt cache
-results/                    # runtime outputs
+results/                    # runtime outputs:
+                            #   <model>/<timestamp>/refusal/<dataset>/
+                            #   <model>/<timestamp>/capability/
 ```
 
 ## Setup (uv)
@@ -79,7 +81,7 @@ uv run pytest -q -m integration
 | `tests/integration/` | E2E vs in-process mock OpenAI server |
 | `tests/integration/conftest.py` | Threaded mock `/v1/chat/completions` |
 
-Integration covers: `ChatClient`, refusal builtins + JSONL, capability scoring, and `run_eval` output layout.
+Integration covers: `ChatClient`, refusal builtins + JSONL, capability scoring, and `run_eval` layout (`refusal/` + `capability/` under the run dir).
 
 ## Package entry
 

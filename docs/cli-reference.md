@@ -25,7 +25,7 @@ uv run refusal-capability-bench --list-datasets
 | `--datasets` | none | Explicit refusal and/or capability ids (overrides preset lists) |
 | `--compare` | none | Second model (refusal × both; capability head-to-head) |
 | `--only` | `auto` | `auto` \| `all` \| `refusal` \| `capability` |
-| `--out-root` | `results` | Parent directory for runs |
+| `--out-root` | `results` | Parent directory for runs (`<out-root>/<model>/<run-id>/`) |
 | `--run-id` | UTC timestamp | Folder under the model dir |
 | `--dataset-limit` | registry default | Max samples **per refusal** dataset |
 | `--limit` | `50` | Samples **per capability** bench |
@@ -56,6 +56,25 @@ uv run refusal-capability-bench --list-datasets
 | `--list-datasets` | — | Print refusal + capability ids |
 
 \*Not required with `--list-presets` / `--list-datasets`.
+
+---
+
+## Output layout (`--out-root`)
+
+Unified runs write:
+
+```text
+<out-root>/<model_slug>/<run-id>/
+  meta.json
+  summary.json
+  report.html                 # if --report
+  refusal/<dataset_folder>/   # one folder per refusal dataset
+  capability/                 # all capability benches
+```
+
+With `--compare`, the model dir is `<model>_vs_<compare>`, and refusal datasets nest per model under `refusal/<dataset>/<model_slug>/`.  
+Dataset folder aliases (e.g. `cyber-overrefusal` → `base_cyber`) are listed in [presets-and-datasets.md](presets-and-datasets.md).  
+Full tree and metrics: [results-and-features.md](results-and-features.md).
 
 ---
 
@@ -96,23 +115,25 @@ refusal-capability-bench --model m --preset quick --skip-hf-check
 
 ## Standalone suite runners
 
-Still available for single-suite debugging:
+Still available for single-suite debugging. These take a flat `--out` directory (they do **not** auto-nest under `refusal/` / `capability/` — that layout is only from `run_eval` / `refusal-capability-bench`).
 
 ```bash
 python -m harness.refusal_eval \
   --model m --dataset xstest --limit 50 --workers 4 \
-  --out results/manual/xstest
+  --out results/manual/refusal/xstest
 
 python -m harness.refusal_eval \
   --model m --dataset prompts_example.jsonl \
   --judge llm --judge-model m \
-  --out results/manual/custom
+  --out results/manual/refusal/custom
 
 python -m harness.capability_eval \
   --model base --compare uncensored \
   --benches gsm8k,mmlu,humaneval \
   --limit 50 --seed 42 --workers 4 \
-  --out results/manual/cap_compare
+  --out results/manual/capability
 ```
+
+Defaults if `--out` omitted: `results/refusal_run` and `results/capability_run`.
 
 See also [presets-and-datasets.md](presets-and-datasets.md) and [results-and-features.md](results-and-features.md).

@@ -6,6 +6,7 @@
 # Suite presets (refusal + capability). Prefer --preset <name>.
 # Source of truth: harness/presets.py (this file is documentation only).
 # An empty list means that suite is intentionally skipped.
+# Unified runner layout: results/<model>/<timestamp>/refusal|capability/
 suite_presets:
   default:
     refusal: [cyber-overrefusal, generic-compliance]

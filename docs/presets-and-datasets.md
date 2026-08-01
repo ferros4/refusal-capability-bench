@@ -13,21 +13,24 @@ refusal-capability-bench --list-datasets
 
 ## Suite presets
 
-An **empty list on one side is intentional** (that suite is skipped).
+Mirror of `suite_presets` in [`datasets_catalog.yaml`](../datasets_catalog.yaml).  
+An **empty list on one side is intentional** (that suite is skipped).  
+Outputs land under `results/<model>/<timestamp>/refusal/` or `…/capability/`.
 
-| Preset | Rec. | Refusal | Capability |
-|--------|:----:|---------|------------|
-| `default` | yes | `cyber-overrefusal`, `generic-compliance` | `gsm8k`, `mmlu`, `humaneval` |
-| `quick` | yes | default + `xstest`, `donotanswer`, `advbench` | core 3 |
-| `compare` | yes | same as `quick` | core 3 |
-| `overrefusal` | yes | builtins + XSTest / OR-Bench / WildChat-OR / CoCoNot | core 3 |
-| `should-refuse` | yes | Do-Not-Answer, AdvBench, HarmBench, StrongREJECT, … | core 3 |
-| `cyber` | yes | `cyber-overrefusal`, `cyber-code-vuln`, `generic-compliance` | core 3 |
-| `refusal-only` | yes | `cyber-overrefusal`, `generic-compliance` | **`[]` skip capability** |
-| `capability-only` | yes | **`[]` skip refusal** | `gsm8k`, `mmlu`, `humaneval` |
-| `capability-smoke` | | **`[]`** | same as capability-only (use small `--limit`) |
-| `mentioned` | | broad recommendation list | core 3 |
-| `full` / `all` | | entire refusal registry | core 3 |
+| Preset | Rec. | Refusal | Capability | Notes |
+|--------|:----:|---------|------------|-------|
+| `default` | yes | `cyber-overrefusal`, `generic-compliance` | `gsm8k`, `mmlu`, `humaneval` | |
+| `quick` | yes | `cyber-overrefusal`, `generic-compliance`, `xstest`, `donotanswer`, `advbench` | `gsm8k`, `mmlu`, `humaneval` | |
+| `compare` | yes | same as `quick` | `gsm8k`, `mmlu`, `humaneval` | intended for `--compare` base vs uncensored |
+| `overrefusal` | yes | `cyber-overrefusal`, `generic-compliance`, `xstest`, `orbench`, `wildchat-over-refusal`, `coconot` | `gsm8k`, `mmlu`, `humaneval` | |
+| `should-refuse` | yes | `donotanswer`, `advbench`, `harmbench`, `strongreject`, `sorrybench`, `harmfulqa`, `llm-lat-harmful` | `gsm8k`, `mmlu`, `humaneval` | |
+| `cyber` | yes | `cyber-overrefusal`, `cyber-code-vuln`, `generic-compliance` | `gsm8k`, `mmlu`, `humaneval` | |
+| `refusal-only` | yes | `cyber-overrefusal`, `generic-compliance` | **`[]`** | default refusal pack; skip capability |
+| `capability-only` | yes | **`[]`** | `gsm8k`, `mmlu`, `humaneval` | skip refusal |
+| `capability-smoke` | | **`[]`** | `gsm8k`, `mmlu`, `humaneval` | same as capability-only; use a small `--limit` |
+| `mentioned` | | broad list — see `PRESETS["mentioned"]` in `refusal_datasets.py` | `gsm8k`, `mmlu`, `humaneval` | |
+| `full` | | entire refusal registry | `gsm8k`, `mmlu`, `humaneval` | long run |
+| `all` | | alias of `full` | same | |
 
 ```bash
 refusal-capability-bench --model m --preset overrefusal
@@ -52,8 +55,8 @@ refusal-capability-bench --model m --preset default --datasets cyber-overrefusal
 
 ## Intent legend (refusal)
 
-| `expected_behavior` | How to read `refusal_rate` |
-|---------------------|----------------------------|
+| `expected` | How to read `refusal_rate` |
+|------------|----------------------------|
 | `over_refuse` | **Lower is better** (benign / educational) |
 | `should_refuse` | **Higher is better** (clearly disallowed) |
 | `mixed` | Use `by_category` / labels in `summary.json` |
@@ -62,8 +65,8 @@ refusal-capability-bench --model m --preset default --datasets cyber-overrefusal
 
 ## Builtins (no download)
 
-| ID | Intent | Notes |
-|----|--------|-------|
+| ID | Expected | Notes |
+|----|----------|-------|
 | `cyber-overrefusal` | over_refuse | Folder alias: `refusal/base_cyber/` |
 | `generic-compliance` | over_refuse | Should almost never refuse |
 
@@ -71,45 +74,49 @@ refusal-capability-bench --model m --preset default --datasets cyber-overrefusal
 
 ## Over-refusal
 
-| ID | HF | Intent | Notes |
-|----|-----|--------|-------|
-| `xstest` | `walledai/XSTest` | mixed | **Gated**, `revision=main` |
+| ID | HF | Expected | Notes |
+|----|-----|----------|-------|
+| `xstest` | `walledai/XSTest` | mixed | **Gated** |
 | `xstest-paul` | `Paul/XSTest` | mixed | Ungated mirror |
-| `orbench` | `bench-llm/or-bench` @ hard-1k | over_refuse | |
-| `orbench-toxic` | `bench-llm/or-bench` @ toxic | should_refuse | |
+| `orbench` | `bench-llm/or-bench@or-bench-hard-1k` | over_refuse | |
+| `orbench-toxic` | `bench-llm/or-bench@or-bench-toxic` | should_refuse | |
 | `wildchat-over-refusal` | `justinphan3110/wildchat_over_refusal` | over_refuse | |
-| `coconot` / `coconot-contrast` | `allenai/coconot` | mixed | |
+| `coconot` | `allenai/coconot@original` | mixed | |
+| `coconot-contrast` | `allenai/coconot@contrast` | mixed | |
 
 ---
 
 ## Should-refuse / safety
 
-| ID | HF | Notes |
-|----|-----|-------|
-| `sorrybench` | `sorry-bench/sorry-bench-202406` | **Gated** |
-| `advbench` | `walledai/AdvBench` | **Gated** |
-| `harmbench` / `harmbench-contextual` | `walledai/HarmBench` | **Gated** |
-| `strongreject` | `walledai/StrongREJECT` | **Gated** |
-| `donotanswer` | `LibrAI/do-not-answer` | |
-| `toxicchat` | `lmsys/toxic-chat` | |
-| `beavertails` | `PKU-Alignment/BeaverTails` | |
-| `safetybench` | `thu-coai/SafetyBench` | EN MC |
-| `harmfulqa` | `declare-lab/HarmfulQA` | |
-| `jbb` / `jbb-behaviors` | JailbreakBench packs | |
-| `wildjailbreak` | `allenai/wildjailbreak` | **Gated** |
-| `in-the-wild-jailbreak` | TrustAIRLab | |
-| `aegis` | NVIDIA Aegis 2.0 | |
-| `llm-lat-harmful` | `LLM-LAT/harmful-dataset` | |
+| ID | HF | Expected | Notes |
+|----|-----|----------|-------|
+| `sorrybench` | `sorry-bench/sorry-bench-202406` | should_refuse | **Gated** |
+| `advbench` | `walledai/AdvBench` | should_refuse | **Gated** |
+| `harmbench` | `walledai/HarmBench@standard` | should_refuse | **Gated** |
+| `harmbench-contextual` | `walledai/HarmBench@contextual` | should_refuse | **Gated** |
+| `strongreject` | `walledai/StrongREJECT` | should_refuse | **Gated** |
+| `toxicchat` | `lmsys/toxic-chat@toxicchat0124` | mixed | |
+| `beavertails` | `PKU-Alignment/BeaverTails` | mixed | |
+| `donotanswer` | `LibrAI/do-not-answer` | should_refuse | |
+| `safetybench` | `thu-coai/SafetyBench@test/en` | mixed | EN MC |
+| `harmfulqa` | `declare-lab/HarmfulQA` | should_refuse | |
+| `jbb` | `walledai/JailbreakBench` | mixed | |
+| `jbb-behaviors` | `JailbreakBench/JBB-Behaviors@behaviors` | mixed | |
+| `wildjailbreak` | `allenai/wildjailbreak@eval` | mixed | **Gated** |
+| `in-the-wild-jailbreak` | `TrustAIRLab/in-the-wild-jailbreak-prompts` | should_refuse | |
+| `aegis` | `nvidia/Aegis-AI-Content-Safety-Dataset-2.0` | mixed | |
+| `llm-lat-harmful` | `LLM-LAT/harmful-dataset` | should_refuse | |
 
 ---
 
 ## Cyber-adjacent
 
-| ID | HF | Intent |
-|----|-----|--------|
+| ID | HF | Expected |
+|----|-----|----------|
 | `cyber-code-vuln` | `CyberNative/Code_Vulnerability_Security_DPO` | over_refuse |
 | `abliterate-refusal` | `byroneverson/abliterate-refusal` | should_refuse |
-| `mrfakename-refusal` / `-xl` | mrfakename pools | mixed |
+| `mrfakename-refusal` | `mrfakename/refusal` | mixed |
+| `mrfakename-refusal-xl` | `mrfakename/refusal-xl` | mixed |
 
 ---
 
@@ -134,6 +141,8 @@ Preflight runs automatically before gated loads. On failure the run aborts unles
 ---
 
 ## Capability benches
+
+`capability_datasets` in the catalog: `gsm8k`, `mmlu`, `humaneval`.
 
 | Bench | Dataset | Metric |
 |-------|---------|--------|

@@ -80,13 +80,15 @@ More presets and every dataset id: [docs/presets-and-datasets.md](docs/presets-a
 ## Where results go
 
 ```text
-results/<model>/<timestamp>/
+results/<model>/<timestamp>/   # or <model>_vs_<compare>/<timestamp>/
   meta.json          # config + safety notice
   summary.json       # headlines (start here)
   report.html        # if you passed --report
-  refusal/           # refusal outputs (per dataset)
-    base_cyber/
-  capability/        # GSM8K / MMLU / HumanEval
+  refusal/           # one subfolder per refusal dataset
+    base_cyber/      # cyber-overrefusal
+    generic_compliance/
+    …
+  capability/        # GSM8K / MMLU / HumanEval (shared summary)
 ```
 
 Open `summary.json` → `headlines`, or `report.html` in a browser.

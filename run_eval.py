@@ -281,7 +281,8 @@ def combine_summary(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run refusal + capability evals into results/<model>/<timestamp>/. "
+            "Run refusal + capability evals into "
+            "results/<model>/<timestamp>/{refusal,capability}/. "
             "Prefer --preset (recommended)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
