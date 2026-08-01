@@ -5,7 +5,7 @@ Evaluate local / LAN LLMs over an **OpenAI-compatible API** (Ollama, llama.cpp, 
 | Suite | Measures |
 |-------|----------|
 | **Refusal** | How often the model declines prompts |
-| **Capability** | Whether core skills hold (GSM8K, MMLU, HumanEval) |
+| **Capability** | Core skills (GSM8K, MMLU) + coding (HumanEval, MBPP, HumanEval+; chat-only, no tools) |
 
 Default API (when `--base-url` is omitted): `http://127.0.0.1:11434/v1`  
 (`--host` / `--port`, port default **11434**)
@@ -67,9 +67,10 @@ refusal-capability-bench \
 # Faster smoke
 refusal-capability-bench --model YOUR_MODEL --preset quick --report
 
-# Refusal only / capability only
+# Refusal only / capability only / coding only (chat completions, no tools)
 refusal-capability-bench --model YOUR_MODEL --preset refusal-only
 refusal-capability-bench --model YOUR_MODEL --preset capability-only --limit 20
+refusal-capability-bench --model YOUR_MODEL --preset coding --limit 20
 ```
 
 **Prefer `--preset`.** Start with `default` or `compare`.  
@@ -88,7 +89,7 @@ results/<model>/<timestamp>/   # or <model>_vs_<compare>/<timestamp>/
     base_cyber/      # cyber-overrefusal
     generic_compliance/
     …
-  capability/        # GSM8K / MMLU / HumanEval (shared summary)
+  capability/        # GSM8K / MMLU / coding benches (shared summary)
 ```
 
 Open `summary.json` → `headlines`, or `report.html` in a browser.
@@ -101,7 +102,7 @@ Details (layout, metrics, Ctrl+C, cache, judges): [docs/results-and-features.md]
 
 | Doc | Contents |
 |-----|----------|
-| [docs/presets-and-datasets.md](docs/presets-and-datasets.md) | All presets, refusal/capability datasets, gated HF URLs |
+| [docs/presets-and-datasets.md](docs/presets-and-datasets.md) | All presets, refusal/capability/coding datasets, gated HF URLs |
 | [docs/cli-reference.md](docs/cli-reference.md) | Full flag list, config keys, standalone runners |
 | [docs/results-and-features.md](docs/results-and-features.md) | Output layout, tok/s, cache, report, safety, TLS |
 | [docs/development.md](docs/development.md) | Layout, tests, packaging |

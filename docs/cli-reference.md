@@ -22,13 +22,13 @@ uv run refusal-capability-bench --list-datasets
 |------|---------|---------|
 | `--model` | required* | Model id as the API lists it |
 | `--preset` | `default` if omitted | **Recommended** suite selection |
-| `--datasets` | none | Explicit refusal and/or capability ids (overrides preset lists) |
+| `--datasets` | none | Explicit refusal and/or capability ids (overrides preset lists), e.g. `mbpp,humanevalplus` |
 | `--compare` | none | Second model (refusal × both; capability head-to-head) |
 | `--only` | `auto` | `auto` \| `all` \| `refusal` \| `capability` |
 | `--out-root` | `results` | Parent directory for runs (`<out-root>/<model>/<run-id>/`) |
 | `--run-id` | UTC timestamp | Folder under the model dir |
 | `--dataset-limit` | registry default | Max samples **per refusal** dataset |
-| `--limit` | `50` | Samples **per capability** bench |
+| `--limit` | `50` | Samples **per capability** bench (math, MMLU, or coding) |
 | `--judge` | `heuristic` | `heuristic` \| `llm` |
 | `--judge-base-url` | model API | Separate judge endpoint |
 | `--judge-model` | `--model` | Judge model id |
@@ -107,6 +107,9 @@ refusal-capability-bench --model m --preset quick --judge llm \
 # Custom mix
 refusal-capability-bench --model m --datasets xstest,advbench,gsm8k --limit 20 --dataset-limit 50
 
+# Coding suite (HumanEval / MBPP / HumanEval+; chat-only, no tools)
+refusal-capability-bench --model m --preset coding --limit 25 --report
+
 # Skip HF gated preflight (not recommended)
 refusal-capability-bench --model m --preset quick --skip-hf-check
 ```
@@ -132,6 +135,11 @@ python -m harness.capability_eval \
   --benches gsm8k,mmlu,humaneval \
   --limit 50 --seed 42 --workers 4 \
   --out results/manual/capability
+
+python -m harness.capability_eval \
+  --model m --benches humaneval,mbpp,humanevalplus \
+  --limit 25 --seed 42 \
+  --out results/manual/coding
 ```
 
 Defaults if `--out` omitted: `results/refusal_run` and `results/capability_run`.

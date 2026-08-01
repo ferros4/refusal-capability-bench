@@ -250,6 +250,63 @@ def test_main_preset_capability_only(tmp_path: Path):
     assert "research_use_notice" in meta
 
 
+def test_main_preset_coding(tmp_path: Path):
+    seen_benches: list[str] = []
+
+    def cap_main(argv):
+        benches = argv[argv.index("--benches") + 1]
+        seen_benches.append(benches)
+        out = Path(argv[argv.index("--out") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "summary.json").write_text(
+            json.dumps(
+                {
+                    "models": {
+                        "code-model": {
+                            "accuracy": 1.0,
+                            "benches": {
+                                "humaneval": {"n": 1, "accuracy": 1.0},
+                                "mbpp": {"n": 1, "accuracy": 1.0},
+                                "humanevalplus": {"n": 1, "accuracy": 1.0},
+                            },
+                        }
+                    }
+                }
+            )
+        )
+        return 0
+
+    with patch.object(run_eval.refusal_eval, "main") as ref_main:
+        with patch.object(run_eval.capability_eval, "main", side_effect=cap_main):
+            rc = run_eval.main(
+                [
+                    "--model",
+                    "code-model",
+                    "--preset",
+                    "coding",
+                    "--out-root",
+                    str(tmp_path),
+                    "--run-id",
+                    "coding_run",
+                    "--limit",
+                    "1",
+                ]
+            )
+    assert rc == 0
+    ref_main.assert_not_called()
+    assert seen_benches == ["humaneval,mbpp,humanevalplus"]
+    meta = json.loads(
+        (tmp_path / "code-model" / "coding_run" / "meta.json").read_text()
+    )
+    assert meta["preset"] == "coding"
+    assert meta["datasets"]["refusal"] == []
+    assert meta["datasets"]["capability"] == [
+        "humaneval",
+        "mbpp",
+        "humanevalplus",
+    ]
+
+
 def test_main_datasets_flag_mixed(tmp_path: Path):
     def fake_refusal_main(argv):
         out = Path(argv[argv.index("--out") + 1])

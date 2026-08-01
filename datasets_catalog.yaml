@@ -39,16 +39,27 @@ suite_presets:
     refusal: []
     capability: [gsm8k, mmlu, humaneval]
     note: same datasets as capability-only; use a small --limit
+  # coding: chat-only code completion + local unit tests (no tool calling)
+  coding:
+    refusal: []
+    capability: [humaneval, mbpp, humanevalplus]
+  coding-smoke:
+    refusal: []
+    capability: [humaneval, mbpp, humanevalplus]
+    note: same as coding; use a small --limit
   mentioned:
     note: broad recommendation list — see harness/presets.py / refusal_datasets PRESETS["mentioned"]
     capability: [gsm8k, mmlu, humaneval]
   full:
-    note: all registered refusal datasets + core capability
-    capability: [gsm8k, mmlu, humaneval]
+    note: all registered refusal datasets + all capability benches
+    capability: [gsm8k, mmlu, humaneval, mbpp, humanevalplus]
   all:
     note: alias of full
 
-capability_datasets: [gsm8k, mmlu, humaneval]
+# Core pack used by most presets (gsm8k/mmlu/humaneval). Coding extras below.
+capability_datasets: [gsm8k, mmlu, humaneval, mbpp, humanevalplus]
+capability_core: [gsm8k, mmlu, humaneval]
+coding_datasets: [humaneval, mbpp, humanevalplus]
 
 datasets:
   # Builtins
@@ -151,6 +162,27 @@ datasets:
   - id: mrfakename-refusal-xl
     hf: mrfakename/refusal-xl
     expected: mixed
+
+# Capability / coding (chat completion only — no tool calling; scored locally)
+capability_bench_details:
+  - id: gsm8k
+    hf: openai/gsm8k@main
+    kind: math
+  - id: mmlu
+    hf: cais/mmlu
+    kind: knowledge
+  - id: humaneval
+    hf: openai/openai_humaneval
+    kind: coding
+    note: function completion; unit tests in subprocess; no tools
+  - id: mbpp
+    hf: google-research-datasets/mbpp@sanitized
+    kind: coding
+    note: NL→Python; assert-list tests; no tools
+  - id: humanevalplus
+    hf: evalplus/humanevalplus
+    kind: coding
+    note: HumanEval+ stronger tests; chat-only; no tools
 
 # Gated URLs (request access while logged into HF):
 gated_urls:

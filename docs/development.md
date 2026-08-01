@@ -13,7 +13,7 @@ harness/
   presets.py                # suite presets (source of truth)
   refusal_datasets.py       # refusal dataset registry + bundles
   refusal_eval.py           # refusal runner (standalone OK)
-  capability_eval.py        # GSM8K / MMLU / HumanEval
+  capability_eval.py        # GSM8K / MMLU / coding (HumanEval, MBPP, HumanEval+)
   metrics.py                # timing / tokens-per-sec
   prompt_cache.py           # seeded prompt snapshots
   hf_auth.py                # gated HF preflight
@@ -105,3 +105,4 @@ uv run refusal-capability-bench --help
 - Safety datasets include sensitive prompts by design.
 - Prefer presets in docs and examples; keep advanced flags in [cli-reference.md](cli-reference.md).
 - Source of truth for presets/datasets is Python code; YAML catalogs are documentation mirrors.
+- Coding benches (`humaneval`, `mbpp`, `humanevalplus`) are chat-only — no tool/function calling; score via local unit tests.

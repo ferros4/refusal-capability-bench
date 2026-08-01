@@ -28,8 +28,10 @@ Outputs land under `results/<model>/<timestamp>/refusal/` or `…/capability/`.
 | `refusal-only` | yes | `cyber-overrefusal`, `generic-compliance` | **`[]`** | default refusal pack; skip capability |
 | `capability-only` | yes | **`[]`** | `gsm8k`, `mmlu`, `humaneval` | skip refusal |
 | `capability-smoke` | | **`[]`** | `gsm8k`, `mmlu`, `humaneval` | same as capability-only; use a small `--limit` |
+| `coding` | yes | **`[]`** | `humaneval`, `mbpp`, `humanevalplus` | chat-only coding; no tools |
+| `coding-smoke` | | **`[]`** | `humaneval`, `mbpp`, `humanevalplus` | same as coding; use a small `--limit` |
 | `mentioned` | | broad list — see `PRESETS["mentioned"]` in `refusal_datasets.py` | `gsm8k`, `mmlu`, `humaneval` | |
-| `full` | | entire refusal registry | `gsm8k`, `mmlu`, `humaneval` | long run |
+| `full` | | entire refusal registry | `gsm8k`, `mmlu`, `humaneval`, `mbpp`, `humanevalplus` | long run |
 | `all` | | alias of `full` | same | |
 
 ```bash
@@ -38,6 +40,7 @@ refusal-capability-bench --model m --preset should-refuse
 refusal-capability-bench --model m --preset cyber
 refusal-capability-bench --model m --preset refusal-only
 refusal-capability-bench --model m --preset capability-only --limit 20
+refusal-capability-bench --model m --preset coding --limit 20
 ```
 
 ---
@@ -142,15 +145,35 @@ Preflight runs automatically before gated loads. On failure the run aborts unles
 
 ## Capability benches
 
-`capability_datasets` in the catalog: `gsm8k`, `mmlu`, `humaneval`.
+Catalog keys: `capability_core` (`gsm8k`, `mmlu`, `humaneval`),  
+`coding_datasets` (`humaneval`, `mbpp`, `humanevalplus`),  
+`capability_datasets` (union of both).
 
-| Bench | Dataset | Metric |
-|-------|---------|--------|
-| `gsm8k` | `openai/gsm8k` | Exact number (`#### N`) |
-| `mmlu` | `cais/mmlu` | Letter A–D |
-| `humaneval` | `openai/openai_humaneval` | Unit tests in a subprocess |
+| Bench | Dataset | Kind | Metric |
+|-------|---------|------|--------|
+| `gsm8k` | `openai/gsm8k` | math | Exact number (`#### N`) |
+| `mmlu` | `cais/mmlu` | knowledge | Letter A–D |
+| `humaneval` | `openai/openai_humaneval` | coding | Unit tests in a subprocess |
+| `mbpp` | `google-research-datasets/mbpp@sanitized` | coding | Assert-list tests in a subprocess |
+| `humanevalplus` | `evalplus/humanevalplus` | coding | Stronger HumanEval+ unit tests |
+
+### Coding benches (no tool calling)
+
+Coding evals are **plain chat completions** only (`messages` user/system — no `tools` /
+function-calling). The model returns source code in the reply; the harness extracts it
+and runs local unit tests in a subprocess.
+
+| Preset | Benches |
+|--------|---------|
+| `coding` / `coding-smoke` | `humaneval`, `mbpp`, `humanevalplus` |
+| `--datasets humaneval,mbpp` | any mix of capability ids |
+
+```bash
+refusal-capability-bench --model m --preset coding --limit 25 --report
+refusal-capability-bench --model m --datasets mbpp,humanevalplus --limit 20
+```
 
 Same `--seed` + `--limit` ⇒ stable A/B compares.  
-**HumanEval** runs model code locally — sandbox untrusted models.
+**All coding benches execute model code locally** — sandbox untrusted models.
 
 For uncensor checks: expect **↓ refusal** on `over_refuse`, **↑ or stable** on `should_refuse`, **≈ flat** capability.

@@ -112,6 +112,62 @@ def test_score_trial_gsm8k_mmlu_humaneval():
     assert pred == "pass"
 
 
+def test_extract_mbpp_code_fence():
+    resp = "Sure:\n```python\ndef add(a, b):\n    return a + b\n```\n"
+    code = cap.extract_mbpp_code(resp)
+    assert "def add" in code
+    assert "return a + b" in code
+
+
+def test_run_mbpp_check_pass_and_fail():
+    code = "def add(a, b):\n    return a + b\n"
+    tests = ["assert add(1, 2) == 3", "assert add(0, 0) == 0"]
+    ok, err = cap.run_mbpp_check(code, tests, timeout_s=3.0)
+    assert ok is True
+    assert err == ""
+
+    bad = "def add(a, b):\n    return a - b\n"
+    ok, err = cap.run_mbpp_check(bad, tests, timeout_s=3.0)
+    assert ok is False
+    assert err
+
+
+def test_score_trial_mbpp_and_humanevalplus():
+    mbpp = Sample(
+        "mbpp",
+        "mbpp-1",
+        "p",
+        {"test_list": ["assert add(2, 3) == 5"], "setup": ""},
+    )
+    ok, pred, gold = cap.score_trial(
+        mbpp, "```python\ndef add(a, b):\n    return a + b\n```"
+    )
+    assert ok is True and pred == "pass" and gold == "pass"
+
+    plus = Sample(
+        "humanevalplus",
+        "HumanEval/0",
+        "p",
+        {
+            "prompt": "def add(a, b):\n",
+            "test": "def check(candidate):\n    assert candidate(2, 3) == 5\n",
+            "entry_point": "add",
+        },
+    )
+    ok, pred, _ = cap.score_trial(
+        plus, "```python\ndef add(a, b):\n    return a+b\n```"
+    )
+    assert ok is True
+    assert pred == "pass"
+
+
+def test_coding_benches_registered():
+    assert "mbpp" in cap.KNOWN_BENCHES
+    assert "humanevalplus" in cap.KNOWN_BENCHES
+    assert cap.CODING_BENCHES == frozenset({"humaneval", "humanevalplus", "mbpp"})
+    assert cap._resolve_loader("mbpp") is cap.load_mbpp
+
+
 def test_summarize_and_diff(tmp_path: Path):
     trials = [
         Trial("gsm8k", "1", "base", True, "1", "1", "r", 0.1),
@@ -210,3 +266,47 @@ def test_load_humaneval_mocked():
         samples = cap.load_humaneval(limit=1, seed=0)
         assert samples[0].sample_id == "HumanEval/0"
         assert "Complete the following Python function" in samples[0].prompt
+        assert "no tools" in samples[0].prompt
+
+
+def test_load_humanevalplus_mocked():
+    fake_ds = [
+        {
+            "task_id": "HumanEval/1",
+            "prompt": "def g():\n",
+            "test": "def check(c):\n pass\n",
+            "entry_point": "g",
+        }
+    ]
+
+    def fake_load_dataset(*args, **kwargs):
+        assert args[0] == "evalplus/humanevalplus"
+        return fake_ds
+
+    with patch.object(cap, "_require_datasets", return_value=fake_load_dataset):
+        samples = cap.load_humanevalplus(limit=1, seed=0)
+        assert samples[0].bench == "humanevalplus"
+        assert samples[0].sample_id == "HumanEval/1"
+
+
+def test_load_mbpp_mocked():
+    fake_ds = [
+        {
+            "task_id": 1,
+            "prompt": "Write a function to add two numbers.",
+            "test_list": ["assert add(1, 2) == 3"],
+            "test_imports": [],
+            "code": "def add(a, b):\n    return a + b\n",
+        }
+    ]
+
+    def fake_load_dataset(*args, **kwargs):
+        return fake_ds
+
+    with patch.object(cap, "_require_datasets", return_value=fake_load_dataset):
+        samples = cap.load_mbpp(limit=1, seed=0)
+        assert len(samples) == 1
+        assert samples[0].bench == "mbpp"
+        assert samples[0].sample_id == "mbpp-1"
+        assert "no tools" in samples[0].prompt
+        assert samples[0].gold["test_list"] == ["assert add(1, 2) == 3"]
