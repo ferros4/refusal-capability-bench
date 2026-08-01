@@ -64,7 +64,7 @@ refusal-capability-bench --model m --preset default --datasets cyber-overrefusal
 
 | ID | Intent | Notes |
 |----|--------|-------|
-| `cyber-overrefusal` | over_refuse | Folder alias: `base_cyber/` |
+| `cyber-overrefusal` | over_refuse | Folder alias: `refusal/base_cyber/` |
 | `generic-compliance` | over_refuse | Should almost never refuse |
 
 ---

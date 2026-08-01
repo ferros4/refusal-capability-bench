@@ -11,14 +11,15 @@ results/
       meta.json                         # config, safety notice, errors, user_stopped
       summary.json                      # combined headlines — start here
       report.html                       # if --report
-      base_cyber/                       # cyber-overrefusal
-        summary.json
-        results.jsonl
-        results.csv
-      generic_compliance/
-      xstest/
-      …
-      capability/
+      refusal/                          # suite from presets (refusal list)
+        base_cyber/                     # cyber-overrefusal
+          summary.json
+          results.jsonl
+          results.csv
+        generic_compliance/
+        xstest/
+        …
+      capability/                       # suite from presets (capability list)
         summary.json
         results.jsonl
         results.csv
@@ -32,8 +33,9 @@ With `--compare`, refusal folders nest per model:
 
 ```text
 results/<model>_vs_<compare>/<timestamp>/
-  base_cyber/<model_slug>/
-  base_cyber/<compare_slug>/
+  refusal/
+    base_cyber/<model_slug>/
+    base_cyber/<compare_slug>/
   capability/                  # both models + delta_compare_minus_base
 ```
 

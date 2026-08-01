@@ -14,7 +14,8 @@ Layout:
   results/<model_slug>/<timestamp>/
     meta.json
     summary.json
-    base_cyber/ ...
+    refusal/
+      base_cyber/ ...
     capability/
 """
 
@@ -558,6 +559,7 @@ def main(argv: list[str] | None = None) -> int:
     run_dir = resolve_run_dir(
         Path(args.out_root), args.model, args.compare, args.run_id
     )
+    refusal_root = run_dir / "refusal"
     capability_dir = run_dir / "capability"
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -635,7 +637,11 @@ def main(argv: list[str] | None = None) -> int:
                 refusal_paths.setdefault(model, {})
                 for ds in datasets:
                     folder = refusal_folder_name(ds)
-                    out = run_dir / folder / mslug if multi_model else run_dir / folder
+                    out = (
+                        refusal_root / folder / mslug
+                        if multi_model
+                        else refusal_root / folder
+                    )
                     if user_stopped:
                         _write_skipped_refusal(out, model, ds, args.judge)
                         refusal_paths[model][ds] = out

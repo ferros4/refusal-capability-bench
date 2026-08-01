@@ -32,8 +32,8 @@ def test_run_eval_refusal_only_layout(mock_llm_server: str, tmp_path: Path):
     run_dir = tmp_path / "mock-model" / "itest1"
     assert (run_dir / "meta.json").exists()
     assert (run_dir / "summary.json").exists()
-    assert (run_dir / "generic_compliance" / "summary.json").exists()
-    assert (run_dir / "generic_compliance" / "results.csv").exists()
+    assert (run_dir / "refusal" / "generic_compliance" / "summary.json").exists()
+    assert (run_dir / "refusal" / "generic_compliance" / "results.csv").exists()
 
     combined = json.loads((run_dir / "summary.json").read_text())
     headlines = combined["headlines"]["refusal"]["mock-model"]["generic-compliance"]
@@ -80,7 +80,7 @@ def test_run_eval_all_suites_mocked_capability(mock_llm_server: str, tmp_path: P
         )
     assert rc == 0
     run_dir = tmp_path / "mock-model" / "itest_all"
-    assert (run_dir / "generic_compliance" / "summary.json").exists()
+    assert (run_dir / "refusal" / "generic_compliance" / "summary.json").exists()
     assert (run_dir / "capability" / "summary.json").exists()
     cap = json.loads((run_dir / "capability" / "summary.json").read_text())
     assert cap["models"]["mock-model"]["benches"]["gsm8k"]["n"] == 1
@@ -118,5 +118,5 @@ def test_run_eval_compare_nests_refusal(mock_llm_server: str, tmp_path: Path):
     )
     assert rc == 0
     run_dir = tmp_path / "base-mod_vs_other-mod" / "cmp1"
-    assert (run_dir / "base_cyber" / "base-mod" / "summary.json").exists()
-    assert (run_dir / "base_cyber" / "other-mod" / "summary.json").exists()
+    assert (run_dir / "refusal" / "base_cyber" / "base-mod" / "summary.json").exists()
+    assert (run_dir / "refusal" / "base_cyber" / "other-mod" / "summary.json").exists()

@@ -96,7 +96,7 @@ def test_load_json_missing_and_present(tmp_path: Path):
 
 def test_combine_summary_headlines(tmp_path: Path):
     run_dir = tmp_path / "mymodel" / "ts1"
-    ref_dir = run_dir / "base_cyber"
+    ref_dir = run_dir / "refusal" / "base_cyber"
     ref_dir.mkdir(parents=True)
     (ref_dir / "summary.json").write_text(
         json.dumps(
@@ -191,8 +191,8 @@ def test_main_preset_refusal_only(tmp_path: Path):
     assert rc == 0
     cap_main.assert_not_called()
     run_dir = tmp_path / "test-model" / "20260101T120000Z"
-    assert (run_dir / "base_cyber" / "summary.json").exists()
-    assert (run_dir / "generic_compliance" / "summary.json").exists()
+    assert (run_dir / "refusal" / "base_cyber" / "summary.json").exists()
+    assert (run_dir / "refusal" / "generic_compliance" / "summary.json").exists()
     assert not (run_dir / "capability").exists()
     meta = json.loads((run_dir / "meta.json").read_text())
     assert meta["preset"] == "refusal-only"
@@ -241,7 +241,7 @@ def test_main_preset_capability_only(tmp_path: Path):
     ref_main.assert_not_called()
     run_dir = tmp_path / "cap-model" / "cap_only"
     assert (run_dir / "capability" / "summary.json").exists()
-    assert not (run_dir / "base_cyber").exists()
+    assert not (run_dir / "refusal").exists()
     meta = json.loads((run_dir / "meta.json").read_text())
     assert meta["preset"] == "capability-only"
     assert meta["datasets"]["refusal"] == []
@@ -332,7 +332,7 @@ def test_main_user_stop_saves_partial(tmp_path: Path):
     run_dir = tmp_path / "stop-model" / "stop_ts"
     meta = json.loads((run_dir / "meta.json").read_text())
     assert meta["user_stopped"] is True
-    assert (run_dir / "base_cyber" / "summary.json").exists()
+    assert (run_dir / "refusal" / "base_cyber" / "summary.json").exists()
     assert (run_dir / "capability" / "summary.json").exists()
 
 

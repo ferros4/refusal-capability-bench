@@ -84,7 +84,8 @@ results/<model>/<timestamp>/
   meta.json          # config + safety notice
   summary.json       # headlines (start here)
   report.html        # if you passed --report
-  base_cyber/        # refusal outputs (per dataset)
+  refusal/           # refusal outputs (per dataset)
+    base_cyber/
   capability/        # GSM8K / MMLU / HumanEval
 ```
 
