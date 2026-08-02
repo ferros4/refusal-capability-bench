@@ -10,6 +10,7 @@ results/
     <YYYYMMDDTHHMMSSZ>/                 # new folder every run
       meta.json                         # config, safety notice, errors, user_stopped
       summary.json                      # combined headlines — start here
+      eval.log                          # run log (DEBUG/INFO/WARNING/ERROR)
       report.html                       # if --report
       refusal/                          # suite from presets (refusal list)
         base_cyber/                     # cyber-overrefusal
@@ -27,6 +28,22 @@ results/
 cache/prompts/
   <dataset>_<hash>.jsonl                # frozen prompt lists for stable compares
   <dataset>_<hash>.meta.json
+```
+
+### Multiple presets
+
+`--preset cyber,coding` (comma-separated) **merges** the presets into one suite:
+
+- Refusal and capability ids are concatenated in flag order, then **deduplicated** (order preserved).
+- Each dataset/bench id is executed **at most once** (e.g. `humaneval` shared by `cyber` and `coding` runs once).
+- Output layout is unchanged: flat `refusal/` and `capability/` under the timestamp.
+
+```text
+results/<model_slug>/<timestamp>/
+  meta.json                    # preset: "cyber,coding"; merged datasets lists
+  summary.json
+  refusal/…                    # union of refusal datasets
+  capability/                  # union of capability benches
 ```
 
 With `--compare`, the top folder is `<model>_vs_<compare>`, and refusal folders nest per model:
@@ -79,6 +96,49 @@ Standalone `python -m harness.refusal_eval` / `capability_eval` write to whateve
 | `overall_tokens_per_sec` | `total_completion_tokens / total_time_s` |
 
 Written into `summary.json`, `results.jsonl`, and `results.csv`.
+
+---
+
+## Logging
+
+Stdlib logging goes to **stderr** and a file:
+
+| Path | When |
+|------|------|
+| `results/<model>/<timestamp>/eval.log` | Default for unified `run_eval` |
+| `<out>/eval.log` | Standalone `refusal_eval` / `capability_eval` |
+| `--log-file PATH` | Override |
+
+```bash
+refusal-capability-bench --model m --preset default --log-level DEBUG
+# or: --log-file logs/my-run.log --log-level INFO
+```
+
+Levels: `DEBUG`, `INFO`, `WARNING`, `ERROR`.  
+`DEBUG` includes per-request stream stats; `WARNING` covers empty content, 502/503 retries, and reasoning fallbacks.
+
+---
+
+## API client (streaming)
+
+Chat calls use **SSE streaming** (`stream: true`) against `/v1/chat/completions`.  
+The client accumulates `delta.content` (and reasoning fields when present), then returns one `ChatResult`.
+
+| Setting | Default | Notes |
+|---------|---------|--------|
+| `--timeout` | `300` | Full stream lifetime (connect + all chunks) |
+| `--max-tokens` | `1024` | Passed through to the API |
+| 502 / 503 | retry | Sleep 5s, up to 10 retries |
+
+### Thinking / reasoning models
+
+Some models (e.g. Qwen “thinking”) stream tokens into `reasoning_content` / similar fields and may leave `content` empty if they hit `--max-tokens` during reasoning. That produced blank `response` columns in `results.csv` for packs like `base_cyber`.
+
+Behavior now:
+
+1. Capture both `content` and reasoning deltas from the stream.
+2. If `content` is empty but reasoning is not → use reasoning as the response and log a **WARNING** (suggest raising `--max-tokens`).
+3. Prefer a higher cap for those models, e.g. `--max-tokens 4096` or `8192`.
 
 ---
 

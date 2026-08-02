@@ -29,7 +29,10 @@ from typing import Any
 from tqdm import tqdm
 
 from harness.api_client import DEFAULT_HOST, DEFAULT_PORT, ChatClient, resolve_base_url
+from harness.logging_config import get_logger, setup_logging
 from harness.metrics import timing_stats
+
+log = get_logger(__name__)
 
 USER_STOPPED = "User stopped test on the command line"
 
@@ -424,16 +427,31 @@ def _eval_one_refusal(
         pt, ct, tt = chat.prompt_tokens, chat.completion_tokens, chat.total_tokens
         tps = chat.tokens_per_sec
         tokens_estimated = chat.tokens_estimated
+        if not (response or "").strip():
+            log.warning(
+                "empty model response sample_id=%s category=%s completion_tokens=%s",
+                sid,
+                cat,
+                ct,
+            )
         if judge == "llm":
             refused = llm_is_refusal(judge_client or client, prompt, response)
         else:
             refused = heuristic_is_refusal(response)
+        log.debug(
+            "refusal sample_id=%s refused=%s latency=%.2fs resp_chars=%s",
+            sid,
+            refused,
+            latency_s,
+            len(response or ""),
+        )
     except KeyboardInterrupt:
         raise
     except Exception as exc:
-        err = f"{type (exc ).__name__ }: {exc }"
+        err = f"{type(exc).__name__}: {exc}"
         refused = True
         response = ""
+        log.exception("refusal sample failed sample_id=%s: %s", sid, exc)
     return TrialResult(
         sample_id=sid,
         category=cat,
@@ -737,6 +755,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Require valid TLS certificates (disables --insecure)",
     )
     parser.add_argument("--out", default="results/refusal_run", help="Output directory")
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Logging level (default: INFO)",
+    )
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="Append logs to this file (default: <out>/eval.log)",
+    )
     return parser.parse_args(argv)
 
 
@@ -809,12 +838,18 @@ def load_samples(
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log_path = args.log_file or str(out_dir / "eval.log")
+    setup_logging(level=args.log_level, log_file=log_path, console=True)
+    log.info("refusal_eval start dataset=%s model=%s out=%s", args.dataset, args.model, out_dir)
     if args.list_datasets:
         from harness.refusal_datasets import PRESETS, list_datasets
 
         print(json.dumps({"datasets": list_datasets(), "presets": PRESETS}, indent=2))
         return 0
     if not args.dataset:
+        log.error("--dataset is required (or pass --list-datasets)")
         print("--dataset is required (or pass --list-datasets)", file=sys.stderr)
         return 2
     samples = load_samples(
@@ -827,8 +862,10 @@ def main(argv: list[str] | None = None) -> int:
         refresh_cache=args.refresh_cache,
     )
     if not samples:
+        log.error("No samples loaded dataset=%s", args.dataset)
         print("No samples loaded", file=sys.stderr)
         return 2
+    log.info("loaded %s samples from %s", len(samples), args.dataset)
 
     try:
         resolved_base_url = resolve_base_url(

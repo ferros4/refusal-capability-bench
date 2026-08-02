@@ -37,6 +37,15 @@ def build_html(run_dir: Path, summary: dict[str, Any] | None = None) -> str:
     headlines = summary.get("headlines") or {}
     refusal = headlines.get("refusal") or {}
     capability = headlines.get("capability") or {}
+    by_preset = headlines.get("by_preset") or summary.get("by_preset") or {}
+
+    def _pct(value: Any) -> str:
+        if value is None:
+            return ""
+        try:
+            return f"{float(value) * 100:.1f}%"
+        except (TypeError, ValueError):
+            return str(value)
 
     ref_rows: list[list[Any]] = []
     for model, ds_map in refusal.items():
@@ -50,8 +59,8 @@ def build_html(run_dir: Path, summary: dict[str, Any] | None = None) -> str:
                     model,
                     ds,
                     info.get("n"),
-                    info.get("refusal_rate"),
-                    info.get("compliance_rate"),
+                    _pct(info.get("refusal_rate")),
+                    _pct(info.get("compliance_rate")),
                     info.get("total_time_s"),
                     info.get("avg_tokens_per_sec"),
                     info.get("overall_tokens_per_sec"),
@@ -82,7 +91,7 @@ def build_html(run_dir: Path, summary: dict[str, Any] | None = None) -> str:
                 [
                     model,
                     bench_name,
-                    bi.get("accuracy"),
+                    _pct(bi.get("accuracy")),
                     bi.get("n"),
                     bi.get("total_time_s"),
                     bi.get("avg_tokens_per_sec"),
@@ -106,13 +115,20 @@ def build_html(run_dir: Path, summary: dict[str, Any] | None = None) -> str:
 
     notice = meta.get("research_use_notice") or RESEARCH_USE_NOTICE
     models = meta.get("models") or summary.get("models") or []
-    preset = meta.get("preset") or ""
+    preset = meta.get("preset") or meta.get("presets") or ""
+    preset_note = ""
+    if by_preset:
+        preset_note = (
+            f"<p class=\"meta\">Multi-preset run: "
+            f"{_esc(', '.join(str(key) for key in by_preset.keys()))}. "
+            f"Dataset/bench ids are prefixed with <code>preset/</code> in the tables.</p>"
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<title>Eval report — {_esc (run_dir .name )}</title>
+<title>Eval report — {_esc(run_dir.name)}</title>
 <style>
   body {{ font-family: system-ui, sans-serif; margin: 2rem; color: #122; background: #fafbfc; }}
   h1,h2 {{ color: #0b3d5c; }}
@@ -127,14 +143,15 @@ def build_html(run_dir: Path, summary: dict[str, Any] | None = None) -> str:
 </head>
 <body>
 <h1>Eval report</h1>
-<p class="meta">Run dir: <code>{_esc (run_dir )}</code><br/>
-Models: {_esc (models )} · Preset: {_esc (preset )} · Elapsed s: {_esc (summary .get ("elapsed_s"))}</p>
-<div class="notice"><strong>Notice:</strong> {_esc (notice )}</div>
+<p class="meta">Run dir: <code>{_esc(run_dir)}</code><br/>
+Models: {_esc(models)} · Preset: {_esc(preset)} · Elapsed s: {_esc(summary.get("elapsed_s"))}</p>
+{preset_note}
+<div class="notice"><strong>Notice:</strong> {_esc(notice)}</div>
 <h2>Refusal</h2>
-{_table (["model","dataset","n","refusal_rate","compliance_rate","total_time_s","avg_tok/s","overall_tok/s"],ref_rows )if ref_rows else "<p>No refusal headlines.</p>"}
+{_table(["model", "dataset", "Count", "refusal_rate", "compliance_rate", "total_time_s", "avg_tok/s", "overall_tok/s"], ref_rows) if ref_rows else "<p>No refusal headlines.</p>"}
 <h2>Capability</h2>
-{_table (["model","bench","accuracy/n","n_or_time","total_time_s","avg_tok/s","overall_tok/s"],cap_rows )if cap_rows else "<p>No capability headlines.</p>"}
-{delta_html }
+{_table(["model", "bench", "accuracy/n", "Count or Time", "total_time_s", "avg_tok/s", "overall_tok/s"], cap_rows) if cap_rows else "<p>No capability headlines.</p>"}
+{delta_html}
 <p class="meta">Generated from <code>summary.json</code> / <code>meta.json</code>.</p>
 </body>
 </html>

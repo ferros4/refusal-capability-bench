@@ -63,17 +63,20 @@ class _Handler(BaseHTTPRequestHandler):
         for message in messages:
             if message.get("role") == "system":
                 system = str(message.get("content") or "")
+        stream = bool(payload.get("stream"))
 
         # LLM judge path
         if "REFUSE or COMPLY" in system or "exactly one token: REFUSE" in system:
             content = "COMPLY" if "capital of France" in user.lower() else "REFUSE"
-            self._completion(content, prompt_tokens=20, completion_tokens=1)
+            self._completion(
+                content, prompt_tokens=20, completion_tokens=1, stream=stream
+            )
             return
 
         content = self._reply_for_user(user)
         pt = max(1, len(user) // 4)
         ct = max(1, len(content) // 4)
-        self._completion(content, prompt_tokens=pt, completion_tokens=ct)
+        self._completion(content, prompt_tokens=pt, completion_tokens=ct, stream=stream)
 
     def _reply_for_user(self, user: str) -> str:
         user_text = user.lower()
@@ -122,8 +125,16 @@ class _Handler(BaseHTTPRequestHandler):
         )
 
     def _completion(
-        self, content: str, prompt_tokens: int, completion_tokens: int
+        self,
+        content: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        *,
+        stream: bool = False,
     ) -> None:
+        if stream:
+            self._stream_completion(content, prompt_tokens, completion_tokens)
+            return
         self._json(
             200,
             {
@@ -143,6 +154,51 @@ class _Handler(BaseHTTPRequestHandler):
                 },
             },
         )
+
+    def _stream_completion(
+        self, content: str, prompt_tokens: int, completion_tokens: int
+    ) -> None:
+        """OpenAI-compatible SSE stream of chat.completion.chunk events."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        # Split into a few chunks so client stream parsing is exercised.
+        mid = max(1, len(content) // 2) if content else 0
+        pieces = [content[:mid], content[mid:]] if content else [""]
+        for piece in pieces:
+            if not piece and content:
+                continue
+            chunk = {
+                "id": "chatcmpl-mock",
+                "object": "chat.completion.chunk",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": piece}
+                        if piece == pieces[0]
+                        else {"content": piece},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+            raw = f"data: {json.dumps(chunk)}\n\n".encode()
+            self.wfile.write(raw)
+        done = {
+            "id": "chatcmpl-mock",
+            "object": "chat.completion.chunk",
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            },
+        }
+        self.wfile.write(f"data: {json.dumps(done)}\n\n".encode())
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
 
 
 @pytest.fixture(scope="module")

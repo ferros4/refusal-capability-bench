@@ -9,7 +9,8 @@ pyproject.toml              # package + console script + uv config
 uv.lock                     # locked dependencies (uv)
 requirements.txt            # optional pip export from uv
 harness/
-  api_client.py             # OpenAI-compatible HTTP client
+  api_client.py             # OpenAI-compatible HTTP client (SSE stream)
+  logging_config.py         # stdlib logging → console + file
   presets.py                # suite presets (source of truth)
   refusal_datasets.py       # refusal dataset registry + bundles
   refusal_eval.py           # refusal runner (standalone OK)
@@ -106,3 +107,6 @@ uv run refusal-capability-bench --help
 - Prefer presets in docs and examples; keep advanced flags in [cli-reference.md](cli-reference.md).
 - Source of truth for presets/datasets is Python code; YAML catalogs are documentation mirrors.
 - Coding benches (`humaneval`, `mbpp`, `humanevalplus`) are chat-only — no tool/function calling; score via local unit tests.
+- Comma-separated `--preset a,b` merges suite lists and dedupes dataset ids before the run.
+- API client streams SSE; logging via `harness/logging_config.py` → console + `eval.log`.
+- Thinking models may need higher `--max-tokens` so final `content` is not empty (see results-and-features.md).

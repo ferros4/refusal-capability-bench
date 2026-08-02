@@ -21,8 +21,8 @@ uv run refusal-capability-bench --list-datasets
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--model` | required* | Model id as the API lists it |
-| `--preset` | `default` if omitted | **Recommended** suite selection |
-| `--datasets` | none | Explicit refusal and/or capability ids (overrides preset lists), e.g. `mbpp,humanevalplus` |
+| `--preset` | `default` if omitted | **Recommended** suite selection; comma-separated merges presets and **dedupes** dataset ids (e.g. `cyber,coding`) |
+| `--datasets` | none | Explicit refusal and/or capability ids (overrides a **single** `--preset`), e.g. `mbpp,humanevalplus` |
 | `--compare` | none | Second model (refusal × both; capability head-to-head) |
 | `--only` | `auto` | `auto` \| `all` \| `refusal` \| `capability` |
 | `--out-root` | `results` | Parent directory for runs (`<out-root>/<model>/<run-id>/`) |
@@ -47,11 +47,13 @@ uv run refusal-capability-bench --list-datasets
 | `--port` | `11434` | Used when `--base-url` omitted (Ollama default) |
 | `--api-key` | `ollama` | Bearer token |
 | `--temperature` | `0.0` | Sampling temperature |
-| `--max-tokens` | `1024` | Generation cap |
+| `--max-tokens` | `1024` | Generation cap (raise for thinking models — see [results-and-features.md](results-and-features.md)) |
 | `--sleep` | `0` | Delay between calls when `workers=1` |
-| `--timeout` | `300` | HTTP timeout (seconds) |
+| `--timeout` | `300` | Full request/stream lifetime (seconds) |
 | `--secure` | off | Verify TLS certificates |
 | `--continue-on-error` | off | Continue after dataset/HF failures |
+| `--log-level` | `INFO` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` |
+| `--log-file` | `<run-dir>/eval.log` | Append logs to this path (also per-suite `eval.log` under each out dir) |
 | `--list-presets` | — | Print suite presets |
 | `--list-datasets` | — | Print refusal + capability ids |
 
@@ -61,16 +63,17 @@ uv run refusal-capability-bench --list-datasets
 
 ## Output layout (`--out-root`)
 
-Unified runs write:
-
 ```text
 <out-root>/<model_slug>/<run-id>/
   meta.json
   summary.json
+  eval.log                    # run log (see --log-level / --log-file)
   report.html                 # if --report
-  refusal/<dataset_folder>/   # one folder per refusal dataset
-  capability/                 # all capability benches
+  refusal/<dataset_folder>/   # one folder per refusal dataset (deduped)
+  capability/                 # all capability benches (deduped)
 ```
+
+Multiple `--preset a,b` values still use this **same flat layout**. Dataset lists from each preset are merged and deduplicated before the run (overlapping benches such as `humaneval` run once).
 
 With `--compare`, the model dir is `<model>_vs_<compare>`, and refusal datasets nest per model under `refusal/<dataset>/<model_slug>/`.  
 Dataset folder aliases (e.g. `cyber-overrefusal` → `base_cyber`) are listed in [presets-and-datasets.md](presets-and-datasets.md).  
@@ -88,7 +91,7 @@ refusal-capability-bench --preset default --report
 
 If `./eval.yaml` exists (or `--config path`), values fill unset options. **CLI wins** when both are set.
 
-Common keys: `host`, `port`, `base_url`, `model`, `compare`, `preset`, `datasets`, `limit`, `dataset_limit`, `seed`, `workers`, `judge`, `judge_model`, `judge_base_url`, `cache_dir`, `report`, `continue_on_error`.
+Common keys: `host`, `port`, `base_url`, `model`, `compare`, `preset`, `datasets`, `limit`, `dataset_limit`, `seed`, `workers`, `judge`, `judge_model`, `judge_base_url`, `cache_dir`, `report`, `continue_on_error`, `max_tokens`, `timeout`, `log_level`, `log_file`.
 
 See [`eval.yaml.example`](../eval.yaml.example).
 
@@ -109,6 +112,13 @@ refusal-capability-bench --model m --datasets xstest,advbench,gsm8k --limit 20 -
 
 # Coding suite (HumanEval / MBPP / HumanEval+; chat-only, no tools)
 refusal-capability-bench --model m --preset coding --limit 25 --report
+
+# Multiple presets merged + deduped (humaneval runs once if in both)
+refusal-capability-bench --model m --preset cyber,coding --limit 20 --report
+refusal-capability-bench --model m --preset refusal-only,coding --limit 20 --report
+
+# Debug empty responses / API stream (writes run-dir/eval.log)
+refusal-capability-bench --model m --preset cyber --max-tokens 4096 --log-level DEBUG
 
 # Skip HF gated preflight (not recommended)
 refusal-capability-bench --model m --preset quick --skip-hf-check

@@ -71,9 +71,14 @@ refusal-capability-bench --model YOUR_MODEL --preset quick --report
 refusal-capability-bench --model YOUR_MODEL --preset refusal-only
 refusal-capability-bench --model YOUR_MODEL --preset capability-only --limit 20
 refusal-capability-bench --model YOUR_MODEL --preset coding --limit 20
+
+# Multiple presets: merged + deduped (each dataset/bench runs once)
+refusal-capability-bench --model YOUR_MODEL --preset cyber,coding --limit 20
+refusal-capability-bench --model YOUR_MODEL --preset refusal-only,coding --limit 20
 ```
 
 **Prefer `--preset`.** Start with `default` or `compare`.  
+Comma-separated presets merge dataset lists and skip duplicates.  
 More presets and every dataset id: [docs/presets-and-datasets.md](docs/presets-and-datasets.md).
 
 ---
@@ -92,9 +97,12 @@ results/<model>/<timestamp>/   # or <model>_vs_<compare>/<timestamp>/
   capability/        # GSM8K / MMLU / coding benches (shared summary)
 ```
 
-Open `summary.json` → `headlines`, or `report.html` in a browser.
+Open `summary.json` → `headlines`, or `report.html` in a browser.  
+Logs: `eval.log` in the run directory (`--log-level DEBUG` for stream detail).
 
-Details (layout, metrics, Ctrl+C, cache, judges): [docs/results-and-features.md](docs/results-and-features.md).
+Thinking models (empty `response` in CSV): raise `--max-tokens` (default **1024**).
+
+Details (layout, metrics, streaming, logging, Ctrl+C, cache, judges): [docs/results-and-features.md](docs/results-and-features.md).
 
 ---
 

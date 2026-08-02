@@ -53,6 +53,8 @@ Thumbs.db
 # Project runtime outputs
 results/
 cache/
+logs/
+*.log
 
 # Local config (keep example tracked)
 eval.yaml

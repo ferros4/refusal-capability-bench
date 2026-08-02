@@ -41,13 +41,37 @@ refusal-capability-bench --model m --preset cyber
 refusal-capability-bench --model m --preset refusal-only
 refusal-capability-bench --model m --preset capability-only --limit 20
 refusal-capability-bench --model m --preset coding --limit 20
+
+# Multiple presets (comma-separated) — lists are merged and deduped
+refusal-capability-bench --model m --preset cyber,coding --limit 20
+refusal-capability-bench --model m --preset refusal-only,coding --limit 20
 ```
+
+### Multiple `--preset` values
+
+Comma-separated presets are **merged into one suite**:
+
+1. Concatenate each preset’s refusal list and capability list (in the order given).
+2. **Deduplicate** with order preserved (each dataset/bench id runs **at most once**).
+3. Run the usual flat layout under `results/<model>/<timestamp>/{refusal,capability}/`.
+
+Example: `--preset cyber,coding`
+
+| Side | Result (deduped) |
+|------|------------------|
+| refusal | `cyber-overrefusal`, `cyber-code-vuln`, `generic-compliance` |
+| capability | `gsm8k`, `mmlu`, `humaneval`, `mbpp`, `humanevalplus` |
+
+`humaneval` appears in both `cyber` and `coding` but is executed **once**.
+
+`meta.json` records `preset` as the joined id (e.g. `cyber,coding`) and the merged dataset lists.
 
 ---
 
 ## Custom `--datasets`
 
-One flag mixes **refusal and capability** ids (overrides preset lists):
+One flag mixes **refusal and capability** ids (overrides a **single** preset’s lists).  
+Cannot be combined with multiple comma-separated `--preset` values.
 
 ```bash
 refusal-capability-bench --model m --datasets xstest,advbench,gsm8k,mmlu

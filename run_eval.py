@@ -33,7 +33,10 @@ from typing import Any
 from harness import capability_eval, refusal_eval
 from harness.api_client import DEFAULT_HOST, DEFAULT_PORT, resolve_base_url
 from harness.capability_eval import USER_STOPPED as CAP_USER_STOPPED
+from harness.logging_config import add_log_file, get_logger, setup_logging
 from harness.refusal_eval import USER_STOPPED as REF_USER_STOPPED
+
+log = get_logger(__name__)
 
 USER_STOPPED = REF_USER_STOPPED
 
@@ -157,6 +160,13 @@ def build_refusal_argv(
     return argv
 
 
+def _append_log_args(argv: list[str], args: argparse.Namespace, log_file: Path) -> list[str]:
+    argv = list(argv)
+    argv.extend(["--log-level", str(getattr(args, "log_level", "INFO"))])
+    argv.extend(["--log-file", str(log_file)])
+    return argv
+
+
 def build_capability_argv(
     *,
     base_url: str,
@@ -210,6 +220,50 @@ def build_capability_argv(
     return argv
 
 
+def _refusal_headlines(refusal_out: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for model, ds_map in refusal_out.items():
+        out[model] = {
+            ds: {
+                "refusal_rate": info.get("refusal_rate"),
+                "compliance_rate": info.get("compliance_rate"),
+                "n": info.get("n"),
+                "total_time_s": info.get("total_time_s"),
+                "avg_tokens_per_sec": info.get("avg_tokens_per_sec"),
+                "overall_tokens_per_sec": info.get("overall_tokens_per_sec"),
+            }
+            for ds, info in ds_map.items()
+            if info
+        }
+    return out
+
+
+def _capability_headlines(capability: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if not capability.get("models"):
+        return out
+    for model, info in capability["models"].items():
+        out[model] = {
+            "overall_accuracy": info.get("accuracy"),
+            "total_time_s": info.get("total_time_s"),
+            "avg_tokens_per_sec": info.get("avg_tokens_per_sec"),
+            "overall_tokens_per_sec": info.get("overall_tokens_per_sec"),
+            "benches": {
+                bench_name: {
+                    "accuracy": bi.get("accuracy"),
+                    "n": bi.get("n"),
+                    "total_time_s": bi.get("total_time_s"),
+                    "avg_tokens_per_sec": bi.get("avg_tokens_per_sec"),
+                    "overall_tokens_per_sec": bi.get("overall_tokens_per_sec"),
+                }
+                for bench_name, bi in (info.get("benches") or {}).items()
+            },
+        }
+    if capability.get("delta_compare_minus_base"):
+        out["delta_compare_minus_base"] = capability["delta_compare_minus_base"]
+    return out
+
+
 def combine_summary(
     *,
     run_dir: Path,
@@ -236,45 +290,98 @@ def combine_summary(
         "capability": capability,
     }
 
-    # Compact headline metrics for quick reading
-    headlines: dict[str, Any] = {"refusal": {}, "capability": {}}
-    for model, ds_map in refusal_out.items():
-        headlines["refusal"][model] = {
-            ds: {
-                "refusal_rate": info.get("refusal_rate"),
-                "compliance_rate": info.get("compliance_rate"),
-                "n": info.get("n"),
-                "total_time_s": info.get("total_time_s"),
-                "avg_tokens_per_sec": info.get("avg_tokens_per_sec"),
-                "overall_tokens_per_sec": info.get("overall_tokens_per_sec"),
-            }
-            for ds, info in ds_map.items()
-            if info
+    combined["headlines"] = {
+        "refusal": _refusal_headlines(refusal_out),
+        "capability": _capability_headlines(capability),
+    }
+    return combined
+
+
+def combine_multi_preset_summary(
+    *,
+    run_dir: Path,
+    models: list[str],
+    elapsed_s: float,
+    config: dict[str, Any],
+    preset_summaries: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Merge per-preset suite summaries into one top-level summary.json."""
+    by_preset: dict[str, Any] = {}
+    headlines_by_preset: dict[str, Any] = {}
+    merged_refusal: dict[str, Any] = {}
+    merged_cap_models: dict[str, Any] = {}
+
+    for preset_id, summary in preset_summaries.items():
+        by_preset[preset_id] = {
+            "refusal": summary.get("refusal") or {},
+            "capability": summary.get("capability") or {},
+            "headlines": summary.get("headlines") or {},
+            "elapsed_s": summary.get("elapsed_s"),
         }
-    if capability.get("models"):
-        for model, info in capability["models"].items():
-            headlines["capability"][model] = {
-                "overall_accuracy": info.get("accuracy"),
-                "total_time_s": info.get("total_time_s"),
-                "avg_tokens_per_sec": info.get("avg_tokens_per_sec"),
-                "overall_tokens_per_sec": info.get("overall_tokens_per_sec"),
-                "benches": {
-                    bench_name: {
-                        "accuracy": bi.get("accuracy"),
-                        "n": bi.get("n"),
-                        "total_time_s": bi.get("total_time_s"),
-                        "avg_tokens_per_sec": bi.get("avg_tokens_per_sec"),
-                        "overall_tokens_per_sec": bi.get("overall_tokens_per_sec"),
-                    }
-                    for bench_name, bi in (info.get("benches") or {}).items()
+        headlines_by_preset[preset_id] = summary.get("headlines") or {}
+
+        for model, ds_map in (summary.get("refusal") or {}).items():
+            merged_refusal.setdefault(model, {})
+            for ds_name, info in ds_map.items():
+                key = f"{preset_id}/{ds_name}"
+                merged_refusal[model][key] = info
+
+        cap = summary.get("capability") or {}
+        for model, info in (cap.get("models") or {}).items():
+            slot = merged_cap_models.setdefault(
+                model,
+                {
+                    "n": 0,
+                    "correct": 0,
+                    "benches": {},
+                    "total_time_s": 0.0,
+                    "avg_tokens_per_sec": None,
+                    "overall_tokens_per_sec": None,
                 },
-            }
-        if capability.get("delta_compare_minus_base"):
-            headlines["capability"]["delta_compare_minus_base"] = capability[
+            )
+            slot["n"] += int(info.get("n") or 0)
+            slot["correct"] += int(info.get("correct") or 0)
+            slot["total_time_s"] = round(
+                float(slot["total_time_s"] or 0) + float(info.get("total_time_s") or 0),
+                4,
+            )
+            for bench_name, bi in (info.get("benches") or {}).items():
+                slot["benches"][f"{preset_id}/{bench_name}"] = bi
+        if cap.get("delta_compare_minus_base"):
+            merged_cap_models.setdefault("_meta", {})
+            merged_cap_models["_meta"][f"delta_{preset_id}"] = cap[
                 "delta_compare_minus_base"
             ]
 
-    combined["headlines"] = headlines
+    for model, info in list(merged_cap_models.items()):
+        if model == "_meta":
+            continue
+        n = int(info.get("n") or 0)
+        correct = int(info.get("correct") or 0)
+        info["accuracy"] = round(correct / n, 4) if n else 0.0
+
+    capability: dict[str, Any] = {"models": {}}
+    meta = merged_cap_models.pop("_meta", None)
+    for model, info in merged_cap_models.items():
+        capability["models"][model] = info
+    if meta:
+        capability["delta_by_preset"] = meta
+
+    combined = {
+        "run_dir": str(run_dir),
+        "models": models,
+        "elapsed_s": round(elapsed_s, 2),
+        "config": config,
+        "presets": list(preset_summaries.keys()),
+        "by_preset": by_preset,
+        "refusal": merged_refusal,
+        "capability": capability,
+        "headlines": {
+            "by_preset": headlines_by_preset,
+            "refusal": _refusal_headlines(merged_refusal),
+            "capability": _capability_headlines(capability),
+        },
+    }
     return combined
 
 
@@ -289,6 +396,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         epilog=(
             "examples:\n"
             "  python run_eval.py --model my-model --preset default\n"
+            "  python run_eval.py --model my-model --preset refusal-only,coding\n"
             "  python run_eval.py --model base --compare uncen --preset compare --limit 50\n"
             "  python run_eval.py --model my-model --datasets xstest,gsm8k,mmlu\n"
             "  python run_eval.py --list-presets\n"
@@ -321,7 +429,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--preset",
         default=None,
         help=(
-            "Recommended: named suite preset selecting refusal + capability datasets. "
+            "Recommended: named suite preset(s) selecting refusal + capability datasets. "
+            "Comma-separated to merge multiple presets (dataset lists unioned and "
+            "deduped so each bench runs once), e.g. cyber,coding. "
             "Default if omitted: 'default'. See --list-presets."
         ),
     )
@@ -331,7 +441,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Optional explicit mix of refusal and/or capability dataset ids "
             "(comma-separated), e.g. xstest,advbench,gsm8k,mmlu. "
-            "When set, overrides the dataset lists from --preset."
+            "When set, overrides the dataset lists from a single --preset "
+            "(cannot combine with multiple presets)."
         ),
     )
     parser.add_argument(
@@ -418,6 +529,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="If one suite/dataset fails, continue and record the error",
     )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Logging level (default: INFO)",
+    )
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="Append logs to this file (default: <run-dir>/eval.log)",
+    )
     return parser.parse_args(argv)
 
 
@@ -500,7 +622,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     args = _apply_file_config(args)
 
-    from harness.presets import list_all_dataset_ids, list_suite_presets, resolve_suite
+    # Console logging immediately; file handler attached once run_dir is known.
+    setup_logging(level=args.log_level, log_file=args.log_file, console=True)
+    log.debug("run_eval starting argv parsed")
+
+    from harness.presets import (
+        list_all_dataset_ids,
+        list_suite_presets,
+        resolve_suites,
+    )
     from harness.safety import META_SAFETY_FIELDS
 
     if args.list_presets:
@@ -541,7 +671,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        suite = resolve_suite(
+        suites = resolve_suites(
             preset=args.preset, datasets=args.datasets, only=args.only
         )
     except ValueError as exc:
@@ -549,10 +679,6 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     dataset_limit = args.dataset_limit
-    refusal_ids = suite.refusal
-    capability_ids = suite.capability
-    only = suite.only
-
     models = [args.model]
     if args.compare:
         models.append(args.compare)
@@ -560,10 +686,19 @@ def main(argv: list[str] | None = None) -> int:
     run_dir = resolve_run_dir(
         Path(args.out_root), args.model, args.compare, args.run_id
     )
-    refusal_root = run_dir / "refusal"
-    capability_dir = run_dir / "capability"
     run_dir.mkdir(parents=True, exist_ok=True)
+    log_path = Path(args.log_file) if args.log_file else (run_dir / "eval.log")
+    add_log_file(log_path, level=args.log_level)
+    log.info(
+        "run_eval start model=%s compare=%s run_dir=%s log_file=%s",
+        args.model,
+        args.compare,
+        run_dir,
+        log_path,
+    )
+    multi_preset = len(suites) > 1
 
+    preset_ids = [suite.preset_id or "custom" for suite in suites]
     config = {
         "base_url": resolved_base_url,
         "host": args.host,
@@ -571,12 +706,30 @@ def main(argv: list[str] | None = None) -> int:
         "models": models,
         "model_dir": str(run_dir.parent.name),
         "timestamp": run_dir.name,
-        "preset": suite.preset_id,
-        "preset_description": suite.description,
-        "only": only,
+        "preset": preset_ids[0] if not multi_preset else preset_ids,
+        "presets": preset_ids,
+        "preset_description": (
+            suites[0].description
+            if not multi_preset
+            else "; ".join(
+                f"{suite.preset_id or 'custom'}: {suite.description}" for suite in suites
+            )
+        ),
+        "only": args.only,
         "datasets": {
-            "refusal": refusal_ids,
-            "capability": capability_ids,
+            "by_preset": {
+                (suite.preset_id or "custom"): {
+                    "refusal": list(suite.refusal),
+                    "capability": list(suite.capability),
+                }
+                for suite in suites
+            },
+            "refusal": sorted(
+                {dataset_id for suite in suites for dataset_id in suite.refusal}
+            ),
+            "capability": sorted(
+                {dataset_id for suite in suites for dataset_id in suite.capability}
+            ),
         },
         "dataset_limit": dataset_limit,
         "judge": args.judge,
@@ -592,13 +745,23 @@ def main(argv: list[str] | None = None) -> int:
         "started_at": datetime.now(timezone.utc).isoformat(),
         **META_SAFETY_FIELDS,
     }
+    # Single-preset back-compat: flat datasets lists match the one suite
+    if not multi_preset:
+        config["datasets"] = {
+            "refusal": list(suites[0].refusal),
+            "capability": list(suites[0].capability),
+        }
+        config["only"] = suites[0].only
+        config["preset_description"] = suites[0].description
     (run_dir / "meta.json").write_text(json.dumps(config, indent=2))
 
-    # HF gated preflight
-    if refusal_ids and not args.skip_hf_check:
+    all_refusal_ids = sorted(
+        {dataset_id for suite in suites for dataset_id in suite.refusal}
+    )
+    if all_refusal_ids and not args.skip_hf_check:
         from harness.hf_auth import check_hf_access
 
-        problems = check_hf_access(refusal_ids, strict=True)
+        problems = check_hf_access(all_refusal_ids, strict=True)
         if problems:
             for msg in problems:
                 print(msg, file=sys.stderr)
@@ -613,155 +776,309 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"Run directory: {run_dir}")
     print(f"API: {resolved_base_url}")
-    print(f"Preset: {suite.preset_id or '(custom)'} — {suite.description}")
-    print(
-        f"Refusal datasets ({len(refusal_ids)}): {', '.join(refusal_ids) or '(none)'}"
-    )
-    print(
-        f"Capability datasets ({len(capability_ids)}): {', '.join(capability_ids) or '(none)'}"
-    )
+    print(f"Presets ({len(suites)}): {', '.join(preset_ids)}")
+    for suite in suites:
+        print(
+            f"  - {suite.preset_id or '(custom)'}: "
+            f"refusal=[{', '.join(suite.refusal) or 'none'}] "
+            f"capability=[{', '.join(suite.capability) or 'none'}]"
+        )
+
     t0 = time.perf_counter()
     errors: list[str] = []
-    refusal_paths: dict[str, dict[str, Path]] = {}
-    multi_model = len(models) > 1
     user_stopped = False
+    multi_model = len(models) > 1
+    preset_summaries: dict[str, dict[str, Any]] = {}
+    # Single-preset paths for back-compat finalize
+    refusal_paths: dict[str, dict[str, Path]] = {}
     cap_dir: Path | None = None
 
     try:
-        # --- Refusal ---
-        if only in ("all", "refusal") and refusal_ids:
-            datasets = refusal_ids
-            for model in models:
-                if user_stopped:
-                    break
-                mslug = slugify(model)
-                refusal_paths.setdefault(model, {})
-                for ds in datasets:
-                    folder = refusal_folder_name(ds)
-                    out = (
-                        refusal_root / folder / mslug
-                        if multi_model
-                        else refusal_root / folder
-                    )
+        for suite in suites:
+            if user_stopped:
+                break
+            preset_key = suite.preset_id or "custom"
+            suite_root = run_dir / preset_key if multi_preset else run_dir
+            suite_root.mkdir(parents=True, exist_ok=True)
+            refusal_root = suite_root / "refusal"
+            capability_dir = suite_root / "capability"
+            suite_t0 = time.perf_counter()
+            suite_refusal_paths: dict[str, dict[str, Path]] = {}
+            suite_cap_dir: Path | None = None
+            suite_errors: list[str] = []
+
+            print(
+                f"\n######## PRESET {preset_key} — {suite.description} ########"
+            )
+
+            only = suite.only
+            refusal_ids = suite.refusal
+            capability_ids = suite.capability
+
+            # --- Refusal ---
+            if only in ("all", "refusal") and refusal_ids:
+                for model in models:
                     if user_stopped:
-                        _write_skipped_refusal(out, model, ds, args.judge)
-                        refusal_paths[model][ds] = out
-                        continue
+                        break
+                    mslug = slugify(model)
+                    suite_refusal_paths.setdefault(model, {})
+                    for ds in refusal_ids:
+                        folder = refusal_folder_name(ds)
+                        out = (
+                            refusal_root / folder / mslug
+                            if multi_model
+                            else refusal_root / folder
+                        )
+                        label = f"{preset_key}/{folder}" if multi_preset else folder
+                        if user_stopped:
+                            _write_skipped_refusal(out, model, ds, args.judge)
+                            suite_refusal_paths[model][ds] = out
+                            continue
+                        print(
+                            f"\n=== REFUSAL  preset={preset_key}  "
+                            f"model={model}  dataset={ds}  -> {out} ==="
+                        )
+                        log.info(
+                            "starting refusal dataset=%s model=%s out=%s",
+                            ds,
+                            model,
+                            out,
+                        )
+                        r_argv = _append_log_args(
+                            build_refusal_argv(
+                                base_url=resolved_base_url,
+                                api_key=args.api_key,
+                                model=model,
+                                dataset=ds,
+                                out=out,
+                                limit=dataset_limit,
+                                judge=args.judge,
+                                temperature=args.temperature,
+                                max_tokens=args.max_tokens,
+                                sleep=args.sleep,
+                                timeout=args.timeout,
+                                secure=args.secure,
+                                workers=args.workers,
+                                seed=args.seed,
+                                judge_base_url=args.judge_base_url,
+                                judge_model=args.judge_model,
+                                judge_api_key=args.judge_api_key,
+                                cache_dir=args.cache_dir,
+                                no_cache=args.no_cache,
+                                refresh_cache=args.refresh_cache,
+                            ),
+                            args,
+                            out / "eval.log",
+                        )
+                        try:
+                            rc = refusal_eval.main(r_argv)
+                            suite_refusal_paths[model][ds] = out
+                            log.info(
+                                "finished refusal dataset=%s model=%s rc=%s",
+                                ds,
+                                model,
+                                rc,
+                            )
+                            if rc == 130:
+                                user_stopped = True
+                                suite_errors.append(f"{label}: {USER_STOPPED}")
+                                break
+                            if rc != 0:
+                                raise RuntimeError(f"refusal_eval exited {rc}")
+                        except KeyboardInterrupt:
+                            user_stopped = True
+                            suite_errors.append(f"{label}: {USER_STOPPED}")
+                            log.warning(
+                                "user stopped during refusal dataset=%s", ds
+                            )
+                            print(f"\n{USER_STOPPED}", file=sys.stderr)
+                            if out.exists() and (out / "summary.json").exists():
+                                suite_refusal_paths[model][ds] = out
+                            else:
+                                _write_skipped_refusal(out, model, ds, args.judge)
+                                suite_refusal_paths[model][ds] = out
+                            break
+                        except Exception as exc:
+                            msg = f"{label}/{mslug}: {type(exc).__name__}: {exc}"
+                            suite_errors.append(msg)
+                            log.exception(
+                                "refusal dataset failed dataset=%s: %s", ds, exc
+                            )
+                            print(msg, file=sys.stderr)
+                            if not args.continue_on_error:
+                                errors.extend(suite_errors)
+                                if multi_preset:
+                                    _finalize_multi(
+                                        run_dir,
+                                        models,
+                                        t0,
+                                        config,
+                                        errors,
+                                        user_stopped,
+                                        preset_summaries,
+                                    )
+                                else:
+                                    _finalize(
+                                        run_dir,
+                                        models,
+                                        suite_refusal_paths,
+                                        None,
+                                        t0,
+                                        config,
+                                        errors,
+                                        user_stopped,
+                                    )
+                                return 1
+
+            # --- Capability ---
+            if only in ("all", "capability") and capability_ids:
+                suite_cap_dir = capability_dir
+                if user_stopped:
+                    _write_skipped_capability(suite_cap_dir, models)
+                else:
                     print(
-                        f"\n=== REFUSAL  model={model }  dataset={ds }  -> {out } ==="
+                        f"\n=== CAPABILITY  preset={preset_key}  "
+                        f"models={models}  benches={capability_ids} "
+                        f"-> {suite_cap_dir} ==="
                     )
-                    r_argv = build_refusal_argv(
-                        base_url=resolved_base_url,
-                        api_key=args.api_key,
-                        model=model,
-                        dataset=ds,
-                        out=out,
-                        limit=dataset_limit,
-                        judge=args.judge,
-                        temperature=args.temperature,
-                        max_tokens=args.max_tokens,
-                        sleep=args.sleep,
-                        timeout=args.timeout,
-                        secure=args.secure,
-                        workers=args.workers,
-                        seed=args.seed,
-                        judge_base_url=args.judge_base_url,
-                        judge_model=args.judge_model,
-                        judge_api_key=args.judge_api_key,
-                        cache_dir=args.cache_dir,
-                        no_cache=args.no_cache,
-                        refresh_cache=args.refresh_cache,
+                    log.info(
+                        "starting capability benches=%s out=%s",
+                        capability_ids,
+                        suite_cap_dir,
+                    )
+                    c_argv = _append_log_args(
+                        build_capability_argv(
+                            base_url=resolved_base_url,
+                            api_key=args.api_key,
+                            model=args.model,
+                            compare=args.compare,
+                            out=suite_cap_dir,
+                            benches=",".join(capability_ids),
+                            limit=args.limit,
+                            seed=args.seed,
+                            temperature=args.temperature,
+                            max_tokens=args.max_tokens,
+                            sleep=args.sleep,
+                            timeout=args.timeout,
+                            secure=args.secure,
+                            mmlu_subjects=args.mmlu_subjects,
+                            workers=args.workers,
+                        ),
+                        args,
+                        suite_cap_dir / "eval.log",
                     )
                     try:
-                        rc = refusal_eval.main(r_argv)
-                        refusal_paths[model][ds] = out
+                        rc = capability_eval.main(c_argv)
+                        log.info("finished capability rc=%s", rc)
                         if rc == 130:
                             user_stopped = True
-                            errors.append(f"{folder }: {USER_STOPPED }")
-                            break
-                        if rc != 0:
-                            raise RuntimeError(f"refusal_eval exited {rc }")
+                            suite_errors.append(
+                                f"{preset_key}/capability: {CAP_USER_STOPPED}"
+                            )
+                        elif rc != 0:
+                            raise RuntimeError(f"capability_eval exited {rc}")
                     except KeyboardInterrupt:
                         user_stopped = True
-                        errors.append(f"{folder }: {USER_STOPPED }")
-                        print(f"\n{USER_STOPPED }", file=sys.stderr)
-                        if out.exists() and (out / "summary.json").exists():
-                            refusal_paths[model][ds] = out
-                        else:
-                            _write_skipped_refusal(out, model, ds, args.judge)
-                            refusal_paths[model][ds] = out
-                        break
+                        suite_errors.append(f"{preset_key}/capability: {USER_STOPPED}")
+                        log.warning("user stopped during capability")
+                        print(f"\n{USER_STOPPED}", file=sys.stderr)
+                        if not (suite_cap_dir / "summary.json").exists():
+                            _write_skipped_capability(suite_cap_dir, models)
                     except Exception as exc:
-                        msg = f"{folder }/{mslug }: {type (exc ).__name__ }: {exc }"
-                        errors.append(msg)
+                        msg = (
+                            f"{preset_key}/capability: "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+                        suite_errors.append(msg)
+                        log.exception("capability failed: %s", exc)
                         print(msg, file=sys.stderr)
                         if not args.continue_on_error:
-                            _finalize(
-                                run_dir,
-                                models,
-                                refusal_paths,
-                                None,
-                                t0,
-                                config,
-                                errors,
-                                user_stopped,
-                            )
+                            errors.extend(suite_errors)
+                            if multi_preset:
+                                _finalize_multi(
+                                    run_dir,
+                                    models,
+                                    t0,
+                                    config,
+                                    errors,
+                                    user_stopped,
+                                    preset_summaries,
+                                )
+                            else:
+                                _finalize(
+                                    run_dir,
+                                    models,
+                                    suite_refusal_paths,
+                                    suite_cap_dir,
+                                    t0,
+                                    config,
+                                    errors,
+                                    user_stopped,
+                                )
                             return 1
 
-                            # --- Capability ---
-        if only in ("all", "capability") and capability_ids:
-            cap_dir = capability_dir
-            if user_stopped:
-                _write_skipped_capability(cap_dir, models)
-            else:
-                print(
-                    f"\n=== CAPABILITY  models={models }  benches={capability_ids } -> {cap_dir } ==="
+            suite_config = {
+                **config,
+                "preset": preset_key,
+                "preset_description": suite.description,
+                "only": only,
+                "datasets": {
+                    "refusal": list(refusal_ids),
+                    "capability": list(capability_ids),
+                },
+            }
+            suite_summary = combine_summary(
+                run_dir=suite_root,
+                models=models,
+                refusal_paths=suite_refusal_paths,
+                capability_dir=suite_cap_dir,
+                elapsed_s=time.perf_counter() - suite_t0,
+                config=suite_config,
+            )
+            if multi_preset:
+                (suite_root / "summary.json").write_text(
+                    json.dumps(suite_summary, indent=2)
                 )
-                c_argv = build_capability_argv(
-                    base_url=resolved_base_url,
-                    api_key=args.api_key,
-                    model=args.model,
-                    compare=args.compare,
-                    out=cap_dir,
-                    benches=",".join(capability_ids),
-                    limit=args.limit,
-                    seed=args.seed,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    sleep=args.sleep,
-                    timeout=args.timeout,
-                    secure=args.secure,
-                    mmlu_subjects=args.mmlu_subjects,
-                    workers=args.workers,
-                )
-                try:
-                    rc = capability_eval.main(c_argv)
-                    if rc == 130:
-                        user_stopped = True
-                        errors.append(f"capability: {CAP_USER_STOPPED }")
-                    elif rc != 0:
-                        raise RuntimeError(f"capability_eval exited {rc }")
-                except KeyboardInterrupt:
-                    user_stopped = True
-                    errors.append(f"capability: {USER_STOPPED }")
-                    print(f"\n{USER_STOPPED }", file=sys.stderr)
-                    if not (cap_dir / "summary.json").exists():
-                        _write_skipped_capability(cap_dir, models)
+            preset_summaries[preset_key] = suite_summary
+            errors.extend(suite_errors)
+            if not multi_preset:
+                refusal_paths = suite_refusal_paths
+                cap_dir = suite_cap_dir
     except KeyboardInterrupt:
         user_stopped = True
         errors.append(USER_STOPPED)
-        print(f"\n{USER_STOPPED }", file=sys.stderr)
+        print(f"\n{USER_STOPPED}", file=sys.stderr)
 
-    _finalize(run_dir, models, refusal_paths, cap_dir, t0, config, errors, user_stopped)
+    if multi_preset:
+        _finalize_multi(
+            run_dir, models, t0, config, errors, user_stopped, preset_summaries
+        )
+    else:
+        _finalize(
+            run_dir,
+            models,
+            refusal_paths,
+            cap_dir,
+            t0,
+            config,
+            errors,
+            user_stopped,
+        )
+    log.info(
+        "run_eval finished errors=%s user_stopped=%s run_dir=%s",
+        len(errors),
+        user_stopped,
+        run_dir,
+    )
 
     if args.report:
         try:
             from harness.report import write_report
 
             report_path = write_report(run_dir)
-            print(f"Wrote report: {report_path }")
+            print(f"Wrote report: {report_path}")
         except Exception as exc:
-            print(f"Report generation failed: {exc }", file=sys.stderr)
+            print(f"Report generation failed: {exc}", file=sys.stderr)
 
     if user_stopped:
         return 130
@@ -855,11 +1172,50 @@ def _finalize(
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2))
     print("\n========== RUN HEADLINES ==========")
     print(json.dumps(summary.get("headlines", {}), indent=2))
-    print(f"\nCombined summary: {run_dir /'summary.json'}")
+    print(f"\nCombined summary: {run_dir / 'summary.json'}")
     if user_stopped:
-        print(f"\n{USER_STOPPED } — partial results saved.", file=sys.stderr)
+        print(f"\n{USER_STOPPED} — partial results saved.", file=sys.stderr)
     elif errors:
-        print(f"Completed with {len (errors )} error(s).", file=sys.stderr)
+        print(f"Completed with {len(errors)} error(s).", file=sys.stderr)
+
+
+def _finalize_multi(
+    run_dir: Path,
+    models: list[str],
+    t0: float,
+    config: dict[str, Any],
+    errors: list[str],
+    user_stopped: bool,
+    preset_summaries: dict[str, dict[str, Any]],
+) -> None:
+    elapsed = time.perf_counter() - t0
+    from harness.safety import META_SAFETY_FIELDS
+
+    config = dict(config)
+    config["finished_at"] = datetime.now(timezone.utc).isoformat()
+    config["errors"] = errors
+    config["user_stopped"] = user_stopped
+    config.update(META_SAFETY_FIELDS)
+    (run_dir / "meta.json").write_text(json.dumps(config, indent=2))
+
+    summary = combine_multi_preset_summary(
+        run_dir=run_dir,
+        models=models,
+        elapsed_s=elapsed,
+        config=config,
+        preset_summaries=preset_summaries,
+    )
+    if user_stopped:
+        summary["user_stopped"] = True
+        summary["interrupted"] = True
+    (run_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+    print("\n========== RUN HEADLINES ==========")
+    print(json.dumps(summary.get("headlines", {}), indent=2))
+    print(f"\nCombined summary: {run_dir / 'summary.json'}")
+    if user_stopped:
+        print(f"\n{USER_STOPPED} — partial results saved.", file=sys.stderr)
+    elif errors:
+        print(f"Completed with {len(errors)} error(s).", file=sys.stderr)
 
 
 def main_cli() -> None:
