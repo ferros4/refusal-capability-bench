@@ -34,7 +34,10 @@ from typing import Any, Callable
 from tqdm import tqdm
 
 from harness.api_client import DEFAULT_HOST, DEFAULT_PORT, ChatClient, resolve_base_url
+from harness.logging_config import get_logger, setup_logging
 from harness.metrics import timing_stats
+
+log = get_logger(__name__)
 
 USER_STOPPED = "User stopped test on the command line"
 
@@ -643,11 +646,31 @@ def _eval_one_capability(
         pt, ct, tt = chat.prompt_tokens, chat.completion_tokens, chat.total_tokens
         tps = chat.tokens_per_sec
         tokens_estimated = chat.tokens_estimated
+        if not (response or "").strip():
+            log.warning(
+                "empty model response bench=%s sample_id=%s completion_tokens=%s",
+                text.bench,
+                text.sample_id,
+                ct,
+            )
         ok, pred, gold = score_trial(text, response)
+        log.debug(
+            "capability bench=%s sample_id=%s correct=%s latency=%.2fs",
+            text.bench,
+            text.sample_id,
+            ok,
+            latency_s,
+        )
     except KeyboardInterrupt:
         raise
     except Exception as exc:
-        err = f"{type (exc ).__name__ }: {exc }"
+        err = f"{type(exc).__name__}: {exc}"
+        log.exception(
+            "capability sample failed bench=%s sample_id=%s: %s",
+            text.bench,
+            text.sample_id,
+            exc,
+        )
         ok, pred, gold = (
             False,
             "",
@@ -903,11 +926,32 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--secure", action="store_true", help="Verify TLS certificates")
     parser.add_argument("--out", default="results/capability_run")
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Logging level (default: INFO)",
+    )
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="Append logs to this file (default: <out>/eval.log)",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log_path = args.log_file or str(out_dir / "eval.log")
+    setup_logging(level=args.log_level, log_file=log_path, console=True)
+    log.info(
+        "capability_eval start model=%s benches=%s out=%s",
+        args.model,
+        args.benches,
+        out_dir,
+    )
     bench_names = [
         bench_name.strip().lower()
         for bench_name in args.benches.split(",")

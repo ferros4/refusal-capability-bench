@@ -120,3 +120,85 @@ def test_run_eval_compare_nests_refusal(mock_llm_server: str, tmp_path: Path):
     run_dir = tmp_path / "base-mod_vs_other-mod" / "cmp1"
     assert (run_dir / "refusal" / "base_cyber" / "base-mod" / "summary.json").exists()
     assert (run_dir / "refusal" / "base_cyber" / "other-mod" / "summary.json").exists()
+
+
+@pytest.mark.integration
+def test_run_eval_multi_preset_merged_deduped(mock_llm_server: str, tmp_path: Path):
+    """--preset a,b merges lists; overlapping capability benches load once."""
+    he_calls = {"n": 0}
+
+    def fake_humaneval(limit, seed):
+        he_calls["n"] += 1
+        return [
+            Sample(
+                "humaneval",
+                "HumanEval/add",
+                "Complete the following Python function.\n\ndef add(a, b):\n",
+                {
+                    "prompt": "def add(a, b):\n",
+                    "test": "def check(candidate):\n    assert candidate(1, 2) == 3\n",
+                    "entry_point": "add",
+                },
+            )
+        ]
+
+    def fake_empty(limit, seed, subjects=None):
+        return []
+
+    def fake_mbpp(limit, seed):
+        return [
+            Sample(
+                "mbpp",
+                "mbpp-1",
+                "Write add.\n",
+                {"test_list": ["assert add(1, 2) == 3"], "setup": ""},
+            )
+        ]
+
+    with (
+        patch("harness.capability_eval.load_gsm8k", side_effect=fake_empty),
+        patch("harness.capability_eval.load_mmlu", side_effect=fake_empty),
+        patch("harness.capability_eval.load_humaneval", side_effect=fake_humaneval),
+        patch("harness.capability_eval.load_humanevalplus", side_effect=fake_empty),
+        patch("harness.capability_eval.load_mbpp", side_effect=fake_mbpp),
+    ):
+        rc = run_eval.main(
+            [
+                "--base-url",
+                mock_llm_server,
+                "--model",
+                "mock-model",
+                "--preset",
+                "capability-only,coding",
+                "--limit",
+                "1",
+                "--out-root",
+                str(tmp_path),
+                "--run-id",
+                "merge1",
+                "--skip-hf-check",
+            ]
+        )
+    assert rc == 0
+    assert he_calls["n"] == 1  # humaneval in both presets → one load
+    run_dir = tmp_path / "mock-model" / "merge1"
+    assert (run_dir / "capability" / "summary.json").exists()
+    assert not (run_dir / "capability-only").exists()
+    assert not (run_dir / "coding").exists()
+    meta = json.loads((run_dir / "meta.json").read_text())
+    assert meta["preset"] == "capability-only,coding"
+    assert meta["datasets"]["capability"] == [
+        "gsm8k",
+        "mmlu",
+        "humaneval",
+        "mbpp",
+        "humanevalplus",
+    ]
+    cap = json.loads((run_dir / "capability" / "summary.json").read_text())
+    assert set(cap["config"]["benches"]) == {
+        "gsm8k",
+        "mmlu",
+        "humaneval",
+        "mbpp",
+        "humanevalplus",
+    }

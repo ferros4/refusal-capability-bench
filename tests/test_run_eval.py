@@ -250,6 +250,97 @@ def test_main_preset_capability_only(tmp_path: Path):
     assert "research_use_notice" in meta
 
 
+def test_main_multi_preset_merges_deduped_flat_layout(tmp_path: Path):
+    """Comma-separated presets merge into one suite; overlapping benches run once."""
+    refusal_datasets: list[str] = []
+    cap_benches: list[str] = []
+
+    def fake_refusal_main(argv):
+        ds = argv[argv.index("--dataset") + 1]
+        refusal_datasets.append(ds)
+        out = Path(argv[argv.index("--out") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "summary.json").write_text(
+            json.dumps(
+                {
+                    "refusal_rate": 0.0,
+                    "compliance_rate": 1.0,
+                    "n": 1,
+                    "total_time_s": 0.1,
+                }
+            )
+        )
+        return 0
+
+    def fake_cap_main(argv):
+        benches = argv[argv.index("--benches") + 1]
+        cap_benches.append(benches)
+        out = Path(argv[argv.index("--out") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "summary.json").write_text(
+            json.dumps(
+                {
+                    "models": {
+                        "multi-model": {
+                            "n": 1,
+                            "correct": 1,
+                            "accuracy": 1.0,
+                            "benches": {
+                                name: {"n": 1, "accuracy": 1.0}
+                                for name in benches.split(",")
+                            },
+                        }
+                    }
+                }
+            )
+        )
+        return 0
+
+    with patch.object(run_eval.refusal_eval, "main", side_effect=fake_refusal_main):
+        with patch.object(run_eval.capability_eval, "main", side_effect=fake_cap_main):
+            rc = run_eval.main(
+                [
+                    "--model",
+                    "multi-model",
+                    "--preset",
+                    "cyber,coding",
+                    "--out-root",
+                    str(tmp_path),
+                    "--run-id",
+                    "multi_ts",
+                    "--limit",
+                    "1",
+                ]
+            )
+    assert rc == 0
+    run_dir = tmp_path / "multi-model" / "multi_ts"
+    # Flat layout (not nested per preset)
+    assert (run_dir / "refusal" / "base_cyber" / "summary.json").exists()
+    assert (run_dir / "refusal" / "generic_compliance" / "summary.json").exists()
+    assert (run_dir / "capability" / "summary.json").exists()
+    assert not (run_dir / "cyber").exists()
+    assert not (run_dir / "coding").exists()
+
+    assert set(refusal_datasets) == {
+        "cyber-overrefusal",
+        "cyber-code-vuln",
+        "generic-compliance",
+    }
+    assert len(cap_benches) == 1
+    benches = cap_benches[0].split(",")
+    assert benches == ["gsm8k", "mmlu", "humaneval", "mbpp", "humanevalplus"]
+    assert benches.count("humaneval") == 1
+
+    meta = json.loads((run_dir / "meta.json").read_text())
+    assert meta["preset"] == "cyber,coding"
+    assert meta["datasets"]["capability"] == benches
+    assert meta["datasets"]["refusal"] == [
+        "cyber-overrefusal",
+        "cyber-code-vuln",
+        "generic-compliance",
+    ]
+
+
 def test_main_preset_coding(tmp_path: Path):
     seen_benches: list[str] = []
 

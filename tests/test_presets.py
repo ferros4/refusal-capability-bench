@@ -112,6 +112,57 @@ def test_unknown_preset():
         presets.resolve_suite(preset="nope-preset", datasets=None)
 
 
+def test_parse_preset_flag_multi():
+    assert presets.parse_preset_flag("default,coding") == ["default", "coding"]
+    assert presets.parse_preset_flag("coding, coding, default") == [
+        "coding",
+        "default",
+    ]
+    assert presets.parse_preset_flag(None) == []
+    assert presets.parse_preset_flag("  ") == []
+
+
+def test_resolve_suite_multi_merges_and_dedupes():
+    suite = presets.resolve_suite(preset="refusal-only,coding", datasets=None)
+    assert suite.preset_id == "refusal-only,coding"
+    assert suite.refusal == ["cyber-overrefusal", "generic-compliance"]
+    assert suite.capability == list(presets.CODING_DATASETS)
+    assert suite.only == "all"
+
+    # Overlapping capability benches (humaneval) appear once
+    cyber_coding = presets.resolve_suite(preset="cyber,coding", datasets=None)
+    assert cyber_coding.refusal == [
+        "cyber-overrefusal",
+        "cyber-code-vuln",
+        "generic-compliance",
+    ]
+    assert cyber_coding.capability == [
+        "gsm8k",
+        "mmlu",
+        "humaneval",
+        "mbpp",
+        "humanevalplus",
+    ]
+    assert cyber_coding.capability.count("humaneval") == 1
+
+
+def test_unique_preserve():
+    assert presets._unique_preserve(["a", "b", "a", "c", "b"]) == ["a", "b", "c"]
+
+
+def test_resolve_suites_returns_single_merged():
+    suites = presets.resolve_suites(preset="cyber,coding", datasets=None)
+    assert len(suites) == 1
+    assert suites[0].preset_id == "cyber,coding"
+
+
+def test_resolve_suites_rejects_multi_with_datasets():
+    with pytest.raises(ValueError, match="--datasets cannot be combined"):
+        presets.resolve_suites(
+            preset="refusal-only,coding", datasets="gsm8k", only=None
+        )
+
+
 def test_catalog_yaml_documents_single_suite_presets():
     """datasets_catalog.yaml should spell out both sides for refusal/capability-only."""
     catalog = yaml.safe_load((ROOT / "datasets_catalog.yaml").read_text())

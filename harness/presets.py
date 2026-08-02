@@ -9,8 +9,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from harness.logging_config import get_logger
 from harness.refusal_datasets import PRESETS as REFUSAL_BUNDLES
 from harness.refusal_datasets import REGISTRY as REFUSAL_REGISTRY
+
+log = get_logger(__name__)
 
 # Core capability pack used by most suite presets
 CAPABILITY_CORE = ("gsm8k", "mmlu", "humaneval")
@@ -266,6 +269,51 @@ def parse_datasets_flag(spec: str) -> tuple[list[str], list[str]]:
     return refusal, capability
 
 
+def parse_preset_flag(spec: str | None) -> list[str]:
+    """Parse comma-separated --preset values, preserving order and dropping dupes."""
+    if not spec or not str(spec).strip():
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for token in _parse_token_list(str(spec)):
+        if token not in seen:
+            out.append(token)
+            seen.add(token)
+    return out
+
+
+def _unique_preserve(items: list[str] | tuple[str, ...]) -> list[str]:
+    """Order-preserving dedupe (like dict.fromkeys / set, but stable)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        if item not in seen:
+            out.append(item)
+            seen.add(item)
+    return out
+
+
+def _resolve_named_preset(preset_id: str) -> ResolvedSuite:
+    """Resolve one preset id (suite preset or legacy refusal bundle). No --only/--datasets."""
+    if preset_id in SUITE_PRESETS:
+        preset_obj = SUITE_PRESETS[preset_id]
+        return ResolvedSuite(
+            preset_id=preset_obj.id,
+            refusal=list(preset_obj.refusal),
+            capability=list(preset_obj.capability),
+            description=preset_obj.description,
+        )
+    if preset_id in REFUSAL_BUNDLES:
+        return ResolvedSuite(
+            preset_id=preset_id,
+            refusal=list(REFUSAL_BUNDLES[preset_id]),
+            capability=list(CAPABILITY_CORE),
+            description=f"Legacy refusal bundle '{preset_id}' + core capability",
+        )
+    known = ", ".join(sorted(SUITE_PRESETS))
+    raise ValueError(f"Unknown preset {preset_id!r}. Known: {known}")
+
+
 def resolve_suite(
     *,
     preset: str | None,
@@ -275,49 +323,67 @@ def resolve_suite(
     """
     Resolve what to run.
 
-    Recommended: pass preset only (default preset if both omitted).
-    Optional --datasets overrides/replaces dataset lists from the preset.
+    --preset accepts a single id or comma-separated ids. Multiple presets are
+    merged: refusal and capability dataset lists are concatenated then
+    deduplicated (order preserved) so each benchmark runs at most once.
+
+    Optional --datasets overrides/replaces dataset lists (single suite only).
     """
-    preset_id = (preset or "").strip() or None
-    if preset_id and preset_id not in SUITE_PRESETS:
-        # allow legacy refusal-only bundle names as preset aliases
-        if preset_id in REFUSAL_BUNDLES:
-            base = ResolvedSuite(
-                preset_id=preset_id,
-                refusal=list(REFUSAL_BUNDLES[preset_id]),
-                capability=list(CAPABILITY_CORE),
-                description=f"Legacy refusal bundle '{preset_id}' + core capability",
-            )
-        else:
-            known = ", ".join(sorted(SUITE_PRESETS))
-            raise ValueError(f"Unknown preset {preset_id!r}. Known: {known}")
-    elif preset_id:
-        preset = SUITE_PRESETS[preset_id]
-        base = ResolvedSuite(
-            preset_id=preset.id,
-            refusal=list(preset.refusal),
-            capability=list(preset.capability),
-            description=preset.description,
+    preset_ids = parse_preset_flag(preset)
+
+    if datasets and len(preset_ids) > 1:
+        raise ValueError(
+            "--datasets cannot be combined with multiple --preset values; "
+            "pass a single preset or only --datasets"
         )
+
+    if len(preset_ids) > 1:
+        parts = [_resolve_named_preset(pid) for pid in preset_ids]
+        refusal: list[str] = []
+        capability: list[str] = []
+        for part in parts:
+            refusal.extend(part.refusal)
+            capability.extend(part.capability)
+        base = ResolvedSuite(
+            preset_id=",".join(preset_ids),
+            refusal=_unique_preserve(refusal),
+            capability=_unique_preserve(capability),
+            description=(
+                "Merged presets "
+                + ", ".join(preset_ids)
+                + ": "
+                + "; ".join(
+                    f"{part.preset_id}: {part.description}" for part in parts
+                )
+            ),
+        )
+        log.info(
+            "merged presets=%s refusal=%s capability=%s",
+            preset_ids,
+            base.refusal,
+            base.capability,
+        )
+    elif preset_ids:
+        base = _resolve_named_preset(preset_ids[0])
+        log.debug("resolved preset=%s", base.preset_id)
     elif datasets:
         base = ResolvedSuite(preset_id=None, description="Custom --datasets selection")
+        log.debug("custom datasets selection")
     else:
-        preset = SUITE_PRESETS["default"]
-        base = ResolvedSuite(
-            preset_id=preset.id,
-            refusal=list(preset.refusal),
-            capability=list(preset.capability),
-            description=preset.description,
-        )
+        base = _resolve_named_preset("default")
+        log.debug("using default preset")
 
     if datasets:
         refusal_list, capability_list = parse_datasets_flag(datasets)
-        base.refusal = refusal_list
-        base.capability = capability_list
+        base.refusal = _unique_preserve(refusal_list)
+        base.capability = _unique_preserve(capability_list)
         if base.description and base.preset_id:
             base.description = f"{base.description} (datasets overridden)"
         else:
             base.description = "Custom --datasets selection"
+    else:
+        base.refusal = _unique_preserve(base.refusal)
+        base.capability = _unique_preserve(base.capability)
 
     # --only filter
     only = (only or "auto").lower()
@@ -338,3 +404,18 @@ def resolve_suite(
         )
 
     return base
+
+
+def resolve_suites(
+    *,
+    preset: str | None,
+    datasets: str | None,
+    only: str | None = None,
+) -> list[ResolvedSuite]:
+    """
+    Resolve suites for a --preset value.
+
+    Multiple comma-separated presets are merged into one suite with deduped
+    dataset lists (each benchmark runs once). Returns a single-element list.
+    """
+    return [resolve_suite(preset=preset, datasets=datasets, only=only)]
