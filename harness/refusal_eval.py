@@ -742,7 +742,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--sleep", type=float, default=0.0, help="Seconds between calls (workers=1)"
     )
-    parser.add_argument("--timeout", type=float, default=300.0)
+    parser.add_argument("--timeout", type=float, default=600.0)
     parser.add_argument(
         "--insecure",
         action="store_true",
