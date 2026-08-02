@@ -32,5 +32,8 @@ report: true
 continue_on_error: false
 
 temperature: 0.0
-max_tokens: 1024
+max_tokens: 1024          # raise for thinking models (e.g. 4096)
 timeout: 300
+
+# log_level: INFO         # DEBUG | INFO | WARNING | ERROR
+# log_file: logs/eval.log # default: <run-dir>/eval.log
