@@ -522,7 +522,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-tokens", type=int, default=1024)
     parser.add_argument("--sleep", type=float, default=0.0)
-    parser.add_argument("--timeout", type=float, default=300.0)
+    parser.add_argument("--timeout", type=float, default=600.0)
     parser.add_argument("--secure", action="store_true")
     parser.add_argument(
         "--continue-on-error",
@@ -576,7 +576,7 @@ def _apply_file_config(args: argparse.Namespace) -> argparse.Namespace:
                 "dataset_limit": None,
                 "temperature": 0.0,
                 "max_tokens": 1024,
-                "timeout": 300.0,
+                "timeout": 600.0,
                 "sleep": 0.0,
             }
             if attr in defaults and cur == defaults[attr] and val is not None:
