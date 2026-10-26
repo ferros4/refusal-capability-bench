@@ -69,17 +69,17 @@ Standalone `python -m harness.refusal_eval` / `capability_eval` write to whateve
 ---
 
 ## Reading results
-
 **Start with** `summary.json` → `headlines`:
 
 - `refusal.<model>.<dataset>.refusal_rate` / `compliance_rate`
 - `refusal.<model>.<dataset>.total_time_s` / `avg_tokens_per_sec` / `overall_tokens_per_sec`
 - `capability.<model>.benches.<bench>.accuracy` (+ timing fields)
+- `capability.<model>` also has `n` / timing rolled up; capability `summary.json` `config.n_samples_total` is the **sum** of per-bench `--limit` (or fewer if a bench is smaller)
 - `capability.delta_compare_minus_base` when comparing
-
 **`report.html`** (from `--report`): browser tables for refusal, capability, and deltas.
 
-**`meta.json`**: run config, `research_use_notice`, errors, `user_stopped`.
+**`meta.json`**: run config (`capability_limit`, `dataset_limit`, seed, …), `research_use_notice`, errors, `user_stopped`.
+
 
 ---
 
@@ -126,7 +126,7 @@ The client accumulates `delta.content` (and reasoning fields when present), then
 
 | Setting | Default | Notes |
 |---------|---------|--------|
-| `--timeout` | `300` | Full stream lifetime (connect + all chunks) |
+| `--timeout` | `600` | Full stream lifetime (connect + all chunks). `ChatClient` default matches. |
 | `--max-tokens` | `1024` | Passed through to the API |
 | 502 / 503 | retry | Sleep 5s, up to 10 retries |
 
@@ -152,10 +152,10 @@ Before loading gated refusal datasets, the harness checks for an HF token and da
 - Login: `huggingface-cli login` or `export HF_TOKEN=…`
 
 ### Prompt snapshot cache
-
 Resolved prompt lists are stored under `cache/prompts/` (keyed by dataset id, seed, limit, revision, config).
 
-- Stable A/B compares across runs
+- Refusal only (capability benches are not snapshot-cached)
+- Stable A/B compares across runs for the same seed/limit
 - `--no-cache` — disable
 - `--refresh-cache` — rebuild entries
 - `--cache-dir PATH` — custom location

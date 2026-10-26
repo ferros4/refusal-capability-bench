@@ -108,5 +108,7 @@ uv run refusal-capability-bench --help
 - Source of truth for presets/datasets is Python code; YAML catalogs are documentation mirrors.
 - Coding benches (`humaneval`, `mbpp`, `humanevalplus`) are chat-only — no tool/function calling; score via local unit tests.
 - Comma-separated `--preset a,b` merges suite lists and dedupes dataset ids before the run.
+- `--limit` = per capability bench; `--dataset-limit` = per refusal dataset; timeout default 600s (`ChatClient` and CLI).
+
 - API client streams SSE; logging via `harness/logging_config.py` → console + `eval.log`.
 - Thinking models may need higher `--max-tokens` so final `content` is not empty (see results-and-features.md).

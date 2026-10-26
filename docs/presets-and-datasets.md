@@ -78,6 +78,30 @@ refusal-capability-bench --model m --datasets xstest,advbench,gsm8k,mmlu
 refusal-capability-bench --model m --preset default --datasets cyber-overrefusal,gsm8k
 ```
 
+## Sample limits
+
+`--limit` and `--dataset-limit` are independent:
+
+| Flag | What it caps | Default |
+|------|----------------|---------|
+| `--limit` | Each **capability** bench (GSM8K, MMLU, HumanEval, MBPP, HumanEval+) | `50` |
+| `--dataset-limit` | Each **refusal** dataset | Registry `default_limit` (see below). `None` = all rows |
+
+`--limit` is **not** a run-wide budget. `--preset coding --limit 25` runs three benches × 25 = **75** coding samples. `--preset cyber,coding --limit 25` is five capability benches × 25 = **125**.
+
+`--dataset-limit` does not apply to capability. If omitted, refusal uses:
+
+| `default_limit` | Datasets |
+|-----------------|----------|
+| entire set (`None`) | builtins, `xstest`, `xstest-paul`, `orbench`, `coconot`, `coconot-contrast`, `advbench`, `harmbench`, `harmbench-contextual`, `strongreject`, `donotanswer`, `jbb`, `jbb-behaviors` |
+| `300` | `sorrybench` |
+| `200` | everything else in the registry (class default), including `cyber-code-vuln`, `orbench-toxic`, `wildchat-over-refusal`, `toxicchat`, `beavertails`, `safetybench`, `harmfulqa`, `wildjailbreak`, `in-the-wild-jailbreak`, `aegis`, `llm-lat-harmful`, `abliterate-refusal`, `mrfakename-refusal`, `mrfakename-refusal-xl` |
+
+A dataset smaller than the cap (e.g. 20 builtin cyber prompts with `--dataset-limit 25`) runs in full.
+
+`--only refusal` / `--only capability` drop the other side after preset merge. `--only auto` and `--only all` do not filter.
+
+
 ---
 
 ## Intent legend (refusal)
@@ -92,10 +116,10 @@ refusal-capability-bench --model m --preset default --datasets cyber-overrefusal
 
 ## Builtins (no download)
 
-| ID | Expected | Notes |
-|----|----------|-------|
-| `cyber-overrefusal` | over_refuse | Folder alias: `refusal/base_cyber/` |
-| `generic-compliance` | over_refuse | Should almost never refuse |
+| ID | Expected | n | Notes |
+|----|----------|--:|-------|
+| `cyber-overrefusal` | over_refuse | 20 | Folder alias: `refusal/base_cyber/` |
+| `generic-compliance` | over_refuse | 5 | Should almost never refuse |
 
 ---
 

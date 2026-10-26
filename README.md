@@ -81,6 +81,9 @@ refusal-capability-bench --model YOUR_MODEL --preset refusal-only,coding --limit
 Comma-separated presets merge dataset lists and skip duplicates.  
 More presets and every dataset id: [docs/presets-and-datasets.md](docs/presets-and-datasets.md).
 
+`--limit` is **per capability bench** (GSM8K, MMLU, HumanEval, …). `--dataset-limit` is **per refusal dataset** and does not affect capability. Five coding/core benches at `--limit 25` is **125** capability samples in one pass. Refusal builtins smaller than the cap run in full (`cyber-overrefusal` 20, `generic-compliance` 5).
+
+
 ---
 
 ## Where results go

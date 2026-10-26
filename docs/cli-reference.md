@@ -24,11 +24,11 @@ uv run refusal-capability-bench --list-datasets
 | `--preset` | `default` if omitted | **Recommended** suite selection; comma-separated merges presets and **dedupes** dataset ids (e.g. `cyber,coding`) |
 | `--datasets` | none | Explicit refusal and/or capability ids (overrides a **single** `--preset`), e.g. `mbpp,humanevalplus` |
 | `--compare` | none | Second model (refusal × both; capability head-to-head) |
-| `--only` | `auto` | `auto` \| `all` \| `refusal` \| `capability` |
+| `--only` | `auto` | `auto` leaves both sides; `refusal` / `capability` drop the other; `all` same as `auto` |
 | `--out-root` | `results` | Parent directory for runs (`<out-root>/<model>/<run-id>/`) |
 | `--run-id` | UTC timestamp | Folder under the model dir |
-| `--dataset-limit` | registry default | Max samples **per refusal** dataset |
-| `--limit` | `50` | Samples **per capability** bench (math, MMLU, or coding) |
+| `--dataset-limit` | registry default | Max samples **per refusal dataset** (does **not** cap GSM8K/MMLU/coding) |
+| `--limit` | `50` | Samples **per capability bench**, not a global budget. All selected benches are concatenated (e.g. 5 benches × 25 = 125) |
 | `--judge` | `heuristic` | `heuristic` \| `llm` |
 | `--judge-base-url` | model API | Separate judge endpoint |
 | `--judge-model` | `--model` | Judge model id |
@@ -49,7 +49,7 @@ uv run refusal-capability-bench --list-datasets
 | `--temperature` | `0.0` | Sampling temperature |
 | `--max-tokens` | `1024` | Generation cap (raise for thinking models — see [results-and-features.md](results-and-features.md)) |
 | `--sleep` | `0` | Delay between calls when `workers=1` |
-| `--timeout` | `300` | Full request/stream lifetime (seconds) |
+| `--timeout` | `600` | Full request/stream lifetime in seconds (connect + all SSE chunks) |
 | `--secure` | off | Verify TLS certificates |
 | `--continue-on-error` | off | Continue after dataset/HF failures |
 | `--log-level` | `INFO` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` |
@@ -60,6 +60,22 @@ uv run refusal-capability-bench --list-datasets
 \*Not required with `--list-presets` / `--list-datasets`.
 
 ---
+
+## Sample limits (`--limit` vs `--dataset-limit`)
+
+| Flag | Applies to | If omitted |
+|------|------------|------------|
+| `--limit` | Each capability bench independently | `50` per bench |
+| `--dataset-limit` | Each refusal dataset independently | That dataset’s registry `default_limit` (`None` = entire set) |
+
+There is **no** total-sample cap across benches. Capability eval loads every selected bench at `--limit`, then runs them as one list (`n_samples_total` in capability `summary.json`).
+
+Refusal cache keys include seed + limit; `--no-cache` / `--refresh-cache` / `--cache-dir` apply to **refusal** prompt snapshots only (capability always resamples with `--seed`).
+
+`--datasets` **cannot** be combined with comma-separated `--preset a,b`.
+
+`--only refusal` after a capability-only preset (or the reverse) yields an empty suite and exits with an error.
+
 
 ## Output layout (`--out-root`)
 
@@ -89,9 +105,10 @@ cp eval.yaml.example eval.yaml
 refusal-capability-bench --preset default --report
 ```
 
-If `./eval.yaml` exists (or `--config path`), values fill unset options. **CLI wins** when both are set.
+If `./eval.yaml` exists (or `--config path`), values fill unset options. **CLI wins** when both are set. Numeric keys (`limit`, `dataset_limit`, `timeout`, …) are applied from the file when the CLI still has the argparse default (so `timeout: 600` in YAML matches the CLI default of 600).
 
 Common keys: `host`, `port`, `base_url`, `model`, `compare`, `preset`, `datasets`, `limit`, `dataset_limit`, `seed`, `workers`, `judge`, `judge_model`, `judge_base_url`, `cache_dir`, `report`, `continue_on_error`, `max_tokens`, `timeout`, `log_level`, `log_file`.
+
 
 See [`eval.yaml.example`](../eval.yaml.example).
 
@@ -130,6 +147,8 @@ refusal-capability-bench --model m --preset quick --skip-hf-check
 
 Still available for single-suite debugging. These take a flat `--out` directory (they do **not** auto-nest under `refusal/` / `capability/` — that layout is only from `run_eval` / `refusal-capability-bench`).
 
+Standalone `refusal_eval --limit` is the refusal cap (same role as unified `--dataset-limit`). Standalone `capability_eval --limit` is per bench (same as unified `--limit`). Timeout default **600s**. Refusal-only extras: `--system`, `--split`, `--insecure` (default on; `--secure` verifies TLS).
+
 ```bash
 python -m harness.refusal_eval \
   --model m --dataset xstest --limit 50 --workers 4 \
@@ -155,3 +174,4 @@ python -m harness.capability_eval \
 Defaults if `--out` omitted: `results/refusal_run` and `results/capability_run`.
 
 See also [presets-and-datasets.md](presets-and-datasets.md) and [results-and-features.md](results-and-features.md).
+
