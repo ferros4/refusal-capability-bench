@@ -40,27 +40,36 @@ suite_presets:
     refusal: []
     capability: [gsm8k, mmlu, humaneval]
     note: same datasets as capability-only; use a small --limit
-  # coding: chat-only code completion + local unit tests (no tool calling)
   coding:
     refusal: []
-    capability: [humaneval, mbpp, humanevalplus]
+    capability: [humaneval, mbpp, humanevalplus, mbppplus]
   coding-smoke:
     refusal: []
-    capability: [humaneval, mbpp, humanevalplus]
+    capability: [humaneval, mbpp, humanevalplus, mbppplus]
     note: same as coding; use a small --limit
+  hard:
+    refusal: []
+    capability: [mmlu-pro, gpqa, math500]
+    note: harder knowledge/math; GPQA Diamond is gated on HF
+  hard-smoke:
+    refusal: []
+    capability: [mmlu-pro, gpqa, math500]
+    note: same as hard; use a small --limit
   mentioned:
     note: broad recommendation list — see harness/presets.py / refusal_datasets PRESETS["mentioned"]
     capability: [gsm8k, mmlu, humaneval]
   full:
     note: all registered refusal datasets + all capability benches
-    capability: [gsm8k, mmlu, humaneval, mbpp, humanevalplus]
+    capability: [gsm8k, mmlu, humaneval, mbpp, humanevalplus, mbppplus, mmlu-pro, gpqa, math500]
   all:
     note: alias of full
 
 # Core pack used by most presets (gsm8k/mmlu/humaneval). Coding extras below.
-capability_datasets: [gsm8k, mmlu, humaneval, mbpp, humanevalplus]
+capability_datasets: [gsm8k, mmlu, humaneval, mbpp, humanevalplus, mbppplus, mmlu-pro, gpqa, math500]
 capability_core: [gsm8k, mmlu, humaneval]
-coding_datasets: [humaneval, mbpp, humanevalplus]
+coding_datasets: [humaneval, mbpp, humanevalplus, mbppplus]
+hard_datasets: [mmlu-pro, gpqa, math500]
+
 
 datasets:
   # Builtins
@@ -184,6 +193,23 @@ capability_bench_details:
     hf: evalplus/humanevalplus
     kind: coding
     note: HumanEval+ stronger tests; chat-only; no tools
+  - id: mbppplus
+    hf: evalplus/mbppplus
+    kind: coding
+    note: MBPP+ stronger assert tests; chat-only; no tools
+  - id: mmlu-pro
+    hf: TIGER-Lab/MMLU-Pro
+    kind: knowledge
+    note: 10-way MC; letter A–J
+  - id: gpqa
+    hf: Idavidrein/gpqa@gpqa_diamond
+    kind: knowledge
+    note: graduate science 4-way MC; gated HF; choices shuffled with seed
+  - id: math500
+    hf: HuggingFaceH4/MATH-500
+    kind: math
+    note: competition math; boxed final answer
+
 
 # Gated URLs (request access while logged into HF):
 gated_urls:
@@ -193,3 +219,5 @@ gated_urls:
   - https://huggingface.co/datasets/walledai/StrongREJECT
   - https://huggingface.co/datasets/sorry-bench/sorry-bench-202406
   - https://huggingface.co/datasets/allenai/wildjailbreak
+  - https://huggingface.co/datasets/Idavidrein/gpqa
+

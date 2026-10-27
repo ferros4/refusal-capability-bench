@@ -328,7 +328,8 @@ def test_main_multi_preset_merges_deduped_flat_layout(tmp_path: Path):
     }
     assert len(cap_benches) == 1
     benches = cap_benches[0].split(",")
-    assert benches == ["gsm8k", "mmlu", "humaneval", "mbpp", "humanevalplus"]
+    assert benches == ["gsm8k", "mmlu", "humaneval", "mbpp", "humanevalplus", "mbppplus"]
+
     assert benches.count("humaneval") == 1
 
     meta = json.loads((run_dir / "meta.json").read_text())
@@ -359,6 +360,7 @@ def test_main_preset_coding(tmp_path: Path):
                                 "humaneval": {"n": 1, "accuracy": 1.0},
                                 "mbpp": {"n": 1, "accuracy": 1.0},
                                 "humanevalplus": {"n": 1, "accuracy": 1.0},
+                                "mbppplus": {"n": 1, "accuracy": 1.0},
                             },
                         }
                     }
@@ -385,7 +387,7 @@ def test_main_preset_coding(tmp_path: Path):
             )
     assert rc == 0
     ref_main.assert_not_called()
-    assert seen_benches == ["humaneval,mbpp,humanevalplus"]
+    assert seen_benches == ["humaneval,mbpp,humanevalplus,mbppplus"]
     meta = json.loads(
         (tmp_path / "code-model" / "coding_run" / "meta.json").read_text()
     )
@@ -395,7 +397,9 @@ def test_main_preset_coding(tmp_path: Path):
         "humaneval",
         "mbpp",
         "humanevalplus",
+        "mbppplus",
     ]
+
 
 
 def test_main_datasets_flag_mixed(tmp_path: Path):

@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-Capability retention eval: GSM8K, MMLU, and chat-only coding benches.
+Capability retention eval: GSM8K, MMLU, MMLU-Pro, GPQA, MATH-500, and
+chat-only coding benches (HumanEval, HumanEval+, MBPP, MBPP+).
 
-Coding benches (HumanEval, HumanEval+, MBPP) use plain chat completions — no
-tool/function calling. Solutions are scored by local unit-test execution.
+Coding benches use plain chat completions — no tool/function calling.
+Solutions are scored by local unit-test execution.
 
 Compares one or two models on the same fixed samples via OpenAI-compatible API.
 
 Examples:
   python capability_eval.py --model qwen3.6:35b-a3b-q8_0 --benches gsm8k,mmlu,humaneval --limit 50
-  python capability_eval.py --model m --benches humaneval,mbpp,humanevalplus --limit 50
+  python capability_eval.py --model m --benches humaneval,mbpp,humanevalplus,mbppplus --limit 50
+  python capability_eval.py --model m --benches mmlu-pro,gpqa,math500 --limit 50
   python capability_eval.py --model base-name --compare uncensored-name --benches gsm8k,mmlu --limit 100
 """
 
@@ -50,14 +52,17 @@ FINAL_ANSWER_RE = re.compile(
     r"(?:####|final answer(?:\s*is)?|answer(?:\s*is)?)\s*[:\s]*\$?([^\n]+)",
     re.I,
 )
+MC_LETTERS = "ABCDEFGHIJ"
 CHOICE_RE = re.compile(
-    r"(?:answer(?:\s*is)?|final answer(?:\s*is)?|therefore|thus|so)\s*[:\s]*\(?([ABCD])\)?",
+    r"(?:answer(?:\s*is)?|final answer(?:\s*is)?|therefore|thus|so)\s*[:\s]*\(?([A-J])\)?",
     re.I,
 )
 BARE_CHOICE_RE = re.compile(
-    r"(?:^|\n)\s*(?:answer\s*[:=]\s*)?\(?([ABCD])\)?\s*(?:\.|$)", re.I | re.M
+    r"(?:^|\n)\s*(?:answer\s*[:=]\s*)?\(?([A-J])\)?\s*(?:\.|$)", re.I | re.M
 )
 CODE_FENCE_RE = re.compile(r"```(?:python)?\s*([\s\S]*?)```", re.I)
+BOXED_RE = re.compile(r"\\boxed\s*")
+
 
 
 def normalize_number(text: str) -> str:
@@ -103,22 +108,23 @@ def score_gsm8k(pred_text: str, gold: str) -> bool:
 
 def extract_mc_letter(text: str, n_choices: int = 4) -> str:
     text = re.sub(r"<think>.*?</think>", " ", text, flags=re.I | re.S)
-    letters = "ABCD"[:n_choices]
+    n_choices = max(1, min(int(n_choices), len(MC_LETTERS)))
+    letters = MC_LETTERS[:n_choices]
     match = CHOICE_RE.search(text)
     if match and match.group(1).upper() in letters:
         return match.group(1).upper()
         # prefer last bare choice near the end
     tail = text[-400:]
-    found = BARE_CHOICE_RE.findall(tail)
+    found = [item.upper() for item in BARE_CHOICE_RE.findall(tail) if item.upper() in letters]
     if found:
-        return found[-1].upper()
+        return found[-1]
         # single letter response
     trial = text.strip().upper()
     if trial in letters:
         return trial
     if len(trial) <= 3 and trial[:1] in letters:
         return trial[:1]
-    ms = re.findall(rf"\b([{letters }])\b", text.upper())
+    ms = re.findall(rf"\b([{letters}])\b", text.upper())
     return ms[-1] if ms else ""
 
 
@@ -127,6 +133,77 @@ def score_mmlu(pred_text: str, gold_idx: int) -> bool:
     if not letter:
         return False
     return ord(letter) - ord("A") == int(gold_idx)
+
+
+def extract_boxed(text: str) -> str:
+    """Last \\boxed{...} (nested braces) or \\boxed token."""
+    key = "\\boxed"
+    pos = text.rfind(key)
+    if pos < 0:
+        return ""
+    i = pos + len(key)
+    while i < len(text) and text[i].isspace():
+        i += 1
+    if i >= len(text):
+        return ""
+    if text[i] != "{":
+        token = text[i:].split()[0] if text[i:].split() else ""
+        return token.strip().rstrip(".,;")
+    depth = 0
+    start = i + 1
+    for j in range(i, len(text)):
+        if text[j] == "{":
+            depth += 1
+        elif text[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:j].strip()
+    return text[start:].strip()
+
+
+def normalize_math_answer(text: str) -> str:
+    text = text.strip().replace("$", "")
+    text = text.replace("\\,", "").replace("\\;", "").replace("\\!", "")
+    text = text.replace("\\left", "").replace("\\right", "")
+    text = text.replace("\\dfrac", "\\frac").replace(" ", "")
+    frac = re.fullmatch(r"\\frac\{([^{}]+)\}\{([^{}]+)\}", text)
+    if frac:
+        text = f"{frac.group(1)}/{frac.group(2)}"
+    if len(text) >= 2 and text[0] == "{" and text[-1] == "}":
+        text = text[1:-1]
+    as_num = normalize_number(text)
+    if as_num != text.strip().replace(",", "").replace("$", "").replace("%", "").strip().rstrip("."):
+        try:
+            float(as_num)
+            return as_num
+        except ValueError:
+            pass
+    try:
+        float(as_num)
+        return as_num
+    except ValueError:
+        return text
+
+
+def extract_math_pred(text: str) -> str:
+    boxed = extract_boxed(text)
+    if boxed:
+        return boxed
+    return extract_gsm8k_pred(text)
+
+
+def score_math500(pred_text: str, gold: str) -> bool:
+    pred = normalize_math_answer(extract_math_pred(pred_text))
+    gold_n = normalize_math_answer(str(gold))
+    if not pred:
+        return False
+    if pred == gold_n:
+        return True
+    try:
+        return float(pred) == float(gold_n)
+    except ValueError:
+        return False
+
 
 
 def _normalize_module_code(code: str) -> str:
@@ -281,7 +358,7 @@ def run_mbpp_check(
 
 
 # Benches that return code via chat and are scored by local execution (no tools).
-CODING_BENCHES = frozenset({"humaneval", "humanevalplus", "mbpp"})
+CODING_BENCHES = frozenset({"humaneval", "humanevalplus", "mbpp", "mbppplus"})
 
 # ---------------------------------------------------------------------------
 # Dataset loaders
@@ -464,20 +541,18 @@ def load_humanevalplus(limit: int | None, seed: int) -> list[Sample]:
     )
 
 
-def load_mbpp(limit: int | None, seed: int) -> list[Sample]:
-    """
-    MBPP sanitized — natural-language → Python, scored with assert lists.
-    Chat completion only (no tool calling).
-    """
+def _load_mbpp_like(
+    *,
+    bench: str,
+    sources: tuple[tuple[str, str | None], ...],
+    limit: int | None,
+    seed: int,
+    fail_msg: str,
+) -> list[Sample]:
+    """NL→Python benches scored with assert lists (MBPP / MBPP+)."""
     load_dataset = _require_datasets()
     ds = None
-    for spec in (
-        ("google-research-datasets/mbpp", "sanitized"),
-        ("mbpp", "sanitized"),
-        ("google-research-datasets/mbpp", None),
-        ("mbpp", None),
-    ):
-        name, config = spec
+    for name, config in sources:
         try:
             ds = (
                 load_dataset(name, config, split="test")
@@ -488,9 +563,7 @@ def load_mbpp(limit: int | None, seed: int) -> list[Sample]:
         except Exception:
             continue
     if ds is None:
-        raise SystemExit(
-            "Failed to load MBPP (tried google-research-datasets/mbpp and mbpp)"
-        )
+        raise SystemExit(fail_msg)
 
     idxs = list(range(len(ds)))
     rng = random.Random(seed)
@@ -506,6 +579,12 @@ def load_mbpp(limit: int | None, seed: int) -> list[Sample]:
         if isinstance(test_list, str):
             test_list = ast.literal_eval(test_list)
         test_list = [str(item) for item in test_list]
+        if not test_list and isinstance(row.get("test"), str) and row["test"].strip():
+            test_list = [
+                line.strip()
+                for line in str(row["test"]).splitlines()
+                if line.strip().startswith("assert ")
+            ]
         setup = str(
             row.get("test_setup_code")
             or row.get("test_setup")
@@ -520,19 +599,230 @@ def load_mbpp(limit: int | None, seed: int) -> list[Sample]:
         )
         out.append(
             Sample(
-                "mbpp",
-                f"mbpp-{task_id}",
+                bench,
+                f"{bench}-{task_id}",
                 user,
                 {"test_list": test_list, "setup": setup, "text": text},
-                {"task_id": task_id},
+                {"task_id": task_id, "dataset": bench},
             )
         )
     if not out:
-        raise SystemExit("Failed to load any MBPP samples")
+        raise SystemExit(f"Failed to load any {bench} samples")
     return out
 
 
-KNOWN_BENCHES = ("gsm8k", "mmlu", "humaneval", "humanevalplus", "mbpp")
+def load_mbpp(limit: int | None, seed: int) -> list[Sample]:
+    """
+    MBPP sanitized — natural-language → Python, scored with assert lists.
+    Chat completion only (no tool calling).
+    """
+    return _load_mbpp_like(
+        bench="mbpp",
+        sources=(
+            ("google-research-datasets/mbpp", "sanitized"),
+            ("mbpp", "sanitized"),
+            ("google-research-datasets/mbpp", None),
+            ("mbpp", None),
+        ),
+        limit=limit,
+        seed=seed,
+        fail_msg="Failed to load MBPP (tried google-research-datasets/mbpp and mbpp)",
+    )
+
+
+def load_mbppplus(limit: int | None, seed: int) -> list[Sample]:
+    """EvalPlus MBPP+ — same prompts, stronger assert tests (chat completion only)."""
+    return _load_mbpp_like(
+        bench="mbppplus",
+        sources=(("evalplus/mbppplus", None),),
+        limit=limit,
+        seed=seed,
+        fail_msg="Failed to load MBPP+ (evalplus/mbppplus)",
+    )
+
+
+def _mc_sample(
+    *,
+    bench: str,
+    sample_id: str,
+    question: str,
+    choices: list[str],
+    gold_idx: int,
+    header: str,
+    extra_meta: dict[str, Any] | None = None,
+) -> Sample:
+    labels = MC_LETTERS[: len(choices)]
+    choice_lines = "\n".join(
+        f"{labels[index]}. {choices[index]}" for index in range(len(choices))
+    )
+    letter_hint = ", ".join(labels)
+    prompt = (
+        "Answer the multiple-choice question. "
+        f"Reply with the final answer as a single letter ({letter_hint}) on the last line.\n\n"
+        f"{header}"
+        f"Question: {question}\n"
+        f"{choice_lines}\n"
+    )
+    meta = {"question": question, "choices": list(choices), "n_choices": len(choices)}
+    if extra_meta:
+        meta.update(extra_meta)
+    return Sample(bench, sample_id, prompt, int(gold_idx), meta)
+
+
+def load_mmlu_pro(limit: int | None, seed: int) -> list[Sample]:
+    """MMLU-Pro — 10-way multiple choice (harder MMLU)."""
+    load_dataset = _require_datasets()
+    ds = load_dataset("TIGER-Lab/MMLU-Pro", split="test")
+    idxs = list(range(len(ds)))
+    rng = random.Random(seed)
+    rng.shuffle(idxs)
+    if limit is not None:
+        idxs = idxs[:limit]
+    out: list[Sample] = []
+    for index in idxs:
+        row = ds[int(index)]
+        choices = row.get("options") or row.get("choices") or []
+        if isinstance(choices, str):
+            choices = ast.literal_eval(choices)
+        choices = [str(item) for item in choices]
+        if not choices:
+            continue
+        if row.get("answer_index") is not None:
+            gold_idx = int(row["answer_index"])
+        else:
+            letter = str(row.get("answer", "A")).strip().upper()[:1]
+            gold_idx = MC_LETTERS.find(letter)
+            if gold_idx < 0:
+                gold_idx = 0
+        qid = row.get("question_id", index)
+        cat = str(row.get("category") or "")
+        out.append(
+            _mc_sample(
+                bench="mmlu-pro",
+                sample_id=f"mmlu-pro-{qid}",
+                question=str(row["question"]).strip(),
+                choices=choices,
+                gold_idx=gold_idx,
+                header=f"Category: {cat}\n" if cat else "",
+                extra_meta={"category": cat},
+            )
+        )
+    if not out:
+        raise SystemExit("Failed to load any MMLU-Pro samples")
+    return out
+
+
+def load_gpqa(limit: int | None, seed: int) -> list[Sample]:
+    """GPQA Diamond — graduate science 4-way MC (choices shuffled with --seed)."""
+    load_dataset = _require_datasets()
+    ds = None
+    for name, config, split in (
+        ("Idavidrein/gpqa", "gpqa_diamond", "train"),
+        ("Idavidrein/gpqa", "gpqa_diamond", "test"),
+    ):
+        try:
+            ds = load_dataset(name, config, split=split)
+            break
+        except Exception:
+            continue
+    if ds is None:
+        raise SystemExit(
+            "Failed to load GPQA Diamond (Idavidrein/gpqa@gpqa_diamond). "
+            "The dataset is gated — huggingface-cli login or HF_TOKEN."
+        )
+    idxs = list(range(len(ds)))
+    rng = random.Random(seed)
+    rng.shuffle(idxs)
+    if limit is not None:
+        idxs = idxs[:limit]
+    out: list[Sample] = []
+    for index in idxs:
+        row = ds[int(index)]
+        question = str(row.get("Question") or row.get("question") or "").strip()
+        correct = str(row.get("Correct Answer") or row.get("correct_answer") or "").strip()
+        incorrect = [
+            str(row.get(key) or "").strip()
+            for key in (
+                "Incorrect Answer 1",
+                "Incorrect Answer 2",
+                "Incorrect Answer 3",
+            )
+        ]
+        choices = [c for c in [correct, *incorrect] if c]
+        if len(choices) < 2 or not question:
+            continue
+        item_rng = random.Random(f"{seed}:{row.get('Record ID', index)}")
+        item_rng.shuffle(choices)
+        gold_idx = choices.index(correct)
+        domain = str(row.get("Subdomain") or row.get("subdomain") or "")
+        rid = row.get("Record ID", index)
+        out.append(
+            _mc_sample(
+                bench="gpqa",
+                sample_id=f"gpqa-{rid}",
+                question=question,
+                choices=choices,
+                gold_idx=gold_idx,
+                header=f"Domain: {domain}\n" if domain else "",
+                extra_meta={"subdomain": domain},
+            )
+        )
+    if not out:
+        raise SystemExit("Failed to load any GPQA samples")
+    return out
+
+
+def load_math500(limit: int | None, seed: int) -> list[Sample]:
+    """MATH-500 — competition math, scored on boxed / numeric final answer."""
+    load_dataset = _require_datasets()
+    ds = load_dataset("HuggingFaceH4/MATH-500", split="test")
+    idxs = list(range(len(ds)))
+    rng = random.Random(seed)
+    rng.shuffle(idxs)
+    if limit is not None:
+        idxs = idxs[:limit]
+    out: list[Sample] = []
+    for index in idxs:
+        row = ds[int(index)]
+        problem = str(row.get("problem") or row.get("question") or "").strip()
+        gold = str(row.get("answer") or "").strip()
+        if not gold:
+            gold = extract_boxed(str(row.get("solution") or ""))
+        prompt = (
+            "Solve the competition math problem. "
+            "Show brief reasoning, then put the final answer in \\boxed{}.\n\n"
+            f"{problem}"
+        )
+        uid = row.get("unique_id", index)
+        out.append(
+            Sample(
+                "math500",
+                f"math500-{uid}",
+                prompt,
+                gold,
+                {
+                    "subject": str(row.get("subject") or ""),
+                    "level": row.get("level"),
+                },
+            )
+        )
+    if not out:
+        raise SystemExit("Failed to load any MATH-500 samples")
+    return out
+
+
+
+KNOWN_BENCHES = (
+    "gsm8k",
+    "mmlu",
+    "mmlu-pro",
+    "gpqa",
+    "math500",
+    "humaneval",
+    "humanevalplus",
+    "mbpp",
+    "mbppplus",
+)
 
 
 def _resolve_loader(name: str) -> Callable[..., list[Sample]]:
@@ -540,14 +830,19 @@ def _resolve_loader(name: str) -> Callable[..., list[Sample]]:
     loaders: dict[str, Callable[..., list[Sample]]] = {
         "gsm8k": load_gsm8k,
         "mmlu": load_mmlu,
+        "mmlu-pro": load_mmlu_pro,
+        "gpqa": load_gpqa,
+        "math500": load_math500,
         "humaneval": load_humaneval,
         "humanevalplus": load_humanevalplus,
         "mbpp": load_mbpp,
+        "mbppplus": load_mbppplus,
     }
     try:
         return loaders[name]
     except KeyError as exc:
         raise KeyError(name) from exc
+
 # ---------------------------------------------------------------------------
 # Eval loop
 # ---------------------------------------------------------------------------
@@ -577,8 +872,13 @@ def score_trial(sample: Sample, response: str) -> tuple[bool, str, str]:
         pred = extract_gsm8k_pred(response)
         ok = pred == normalize_number(str(sample.gold))
         return ok, pred, str(sample.gold)
-    if sample.bench == "mmlu":
-        letter = extract_mc_letter(response)
+    if sample.bench == "math500":
+        pred = extract_math_pred(response)
+        ok = score_math500(response, str(sample.gold))
+        return ok, pred, str(sample.gold)
+    if sample.bench in ("mmlu", "mmlu-pro", "gpqa"):
+        n_choices = int(sample.meta.get("n_choices") or 4)
+        letter = extract_mc_letter(response, n_choices=n_choices)
         gold_letter = chr(ord("A") + int(sample.gold))
         ok = letter == gold_letter
         return ok, letter, gold_letter
@@ -589,7 +889,7 @@ def score_trial(sample: Sample, response: str) -> tuple[bool, str, str]:
             code, gold_payload["test"], gold_payload["entry_point"]
         )
         return ok, ("pass" if ok else f"fail:{err[:120]}"), "pass"
-    if sample.bench == "mbpp":
+    if sample.bench in ("mbpp", "mbppplus"):
         gold_payload = sample.gold
         code = extract_mbpp_code(response)
         ok, err = run_mbpp_check(
@@ -599,6 +899,7 @@ def score_trial(sample: Sample, response: str) -> tuple[bool, str, str]:
         )
         return ok, ("pass" if ok else f"fail:{err[:120]}"), "pass"
     raise ValueError(sample.bench)
+
 
 def _stopped_trial(sample: Sample, model: str) -> Trial:
     gold = str(sample.gold if not isinstance(sample.gold, dict) else "pass")
@@ -878,9 +1179,11 @@ def write_outputs(out_dir: Path, trials: list[Trial], summary: dict[str, Any]) -
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Capability eval (GSM8K / MMLU / coding: HumanEval, HumanEval+, MBPP). "
+            "Capability eval (GSM8K / MMLU / MMLU-Pro / GPQA / MATH-500 / "
+            "coding: HumanEval, HumanEval+, MBPP, MBPP+). "
             "Coding benches are chat-only — no tool calling."
         )
+
     )
     parser.add_argument(
         "--base-url",

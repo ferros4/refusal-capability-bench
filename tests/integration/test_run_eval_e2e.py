@@ -161,6 +161,7 @@ def test_run_eval_multi_preset_merged_deduped(mock_llm_server: str, tmp_path: Pa
         patch("harness.capability_eval.load_humaneval", side_effect=fake_humaneval),
         patch("harness.capability_eval.load_humanevalplus", side_effect=fake_empty),
         patch("harness.capability_eval.load_mbpp", side_effect=fake_mbpp),
+        patch("harness.capability_eval.load_mbppplus", side_effect=fake_empty),
     ):
         rc = run_eval.main(
             [
@@ -193,6 +194,7 @@ def test_run_eval_multi_preset_merged_deduped(mock_llm_server: str, tmp_path: Pa
         "humaneval",
         "mbpp",
         "humanevalplus",
+        "mbppplus",
     ]
     cap = json.loads((run_dir / "capability" / "summary.json").read_text())
     assert set(cap["config"]["benches"]) == {
@@ -201,4 +203,6 @@ def test_run_eval_multi_preset_merged_deduped(mock_llm_server: str, tmp_path: Pa
         "humaneval",
         "mbpp",
         "humanevalplus",
+        "mbppplus",
     }
+

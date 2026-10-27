@@ -106,7 +106,8 @@ uv run refusal-capability-bench --help
 - Safety datasets include sensitive prompts by design.
 - Prefer presets in docs and examples; keep advanced flags in [cli-reference.md](cli-reference.md).
 - Source of truth for presets/datasets is Python code; YAML catalogs are documentation mirrors.
-- Coding benches (`humaneval`, `mbpp`, `humanevalplus`) are chat-only — no tool/function calling; score via local unit tests.
+- Coding benches (`humaneval`, `mbpp`, `humanevalplus`, `mbppplus`) are chat-only — no tool/function calling; score via local unit tests. Hard pack: `mmlu-pro`, `gpqa`, `math500`.
+
 - Comma-separated `--preset a,b` merges suite lists and dedupes dataset ids before the run.
 - `--limit` = per capability bench; `--dataset-limit` = per refusal dataset; timeout default 600s (`ChatClient` and CLI).
 

@@ -28,11 +28,14 @@ Outputs land under `results/<model>/<timestamp>/refusal/` or `…/capability/`.
 | `refusal-only` | yes | `cyber-overrefusal`, `generic-compliance` | **`[]`** | default refusal pack; skip capability |
 | `capability-only` | yes | **`[]`** | `gsm8k`, `mmlu`, `humaneval` | skip refusal |
 | `capability-smoke` | | **`[]`** | `gsm8k`, `mmlu`, `humaneval` | same as capability-only; use a small `--limit` |
-| `coding` | yes | **`[]`** | `humaneval`, `mbpp`, `humanevalplus` | chat-only coding; no tools |
-| `coding-smoke` | | **`[]`** | `humaneval`, `mbpp`, `humanevalplus` | same as coding; use a small `--limit` |
+| `coding` | yes | **`[]`** | `humaneval`, `mbpp`, `humanevalplus`, `mbppplus` | chat-only coding; no tools |
+| `coding-smoke` | | **`[]`** | `humaneval`, `mbpp`, `humanevalplus`, `mbppplus` | same as coding; use a small `--limit` |
+| `hard` | yes | **`[]`** | `mmlu-pro`, `gpqa`, `math500` | harder knowledge/math; GPQA gated |
+| `hard-smoke` | | **`[]`** | `mmlu-pro`, `gpqa`, `math500` | same as hard; use a small `--limit` |
 | `mentioned` | | broad list — see `PRESETS["mentioned"]` in `refusal_datasets.py` | `gsm8k`, `mmlu`, `humaneval` | |
-| `full` | | entire refusal registry | `gsm8k`, `mmlu`, `humaneval`, `mbpp`, `humanevalplus` | long run |
+| `full` | | entire refusal registry | all capability ids (core + coding + hard) | long run |
 | `all` | | alias of `full` | same | |
+
 
 ```bash
 refusal-capability-bench --model m --preset overrefusal
@@ -41,6 +44,8 @@ refusal-capability-bench --model m --preset cyber
 refusal-capability-bench --model m --preset refusal-only
 refusal-capability-bench --model m --preset capability-only --limit 20
 refusal-capability-bench --model m --preset coding --limit 20
+refusal-capability-bench --model m --preset hard --limit 20
+
 
 # Multiple presets (comma-separated) — lists are merged and deduped
 refusal-capability-bench --model m --preset cyber,coding --limit 20
@@ -60,7 +65,8 @@ Example: `--preset cyber,coding`
 | Side | Result (deduped) |
 |------|------------------|
 | refusal | `cyber-overrefusal`, `cyber-code-vuln`, `generic-compliance` |
-| capability | `gsm8k`, `mmlu`, `humaneval`, `mbpp`, `humanevalplus` |
+| capability | `gsm8k`, `mmlu`, `humaneval`, `mbpp`, `humanevalplus`, `mbppplus` |
+
 
 `humaneval` appears in both `cyber` and `coding` but is executed **once**.
 
@@ -188,22 +194,28 @@ Preflight runs automatically before gated loads. On failure the run aborts unles
 | StrongREJECT | https://huggingface.co/datasets/walledai/StrongREJECT |
 | Sorry-Bench | https://huggingface.co/datasets/sorry-bench/sorry-bench-202406 |
 | WildJailbreak | https://huggingface.co/datasets/allenai/wildjailbreak |
+| GPQA Diamond | https://huggingface.co/datasets/Idavidrein/gpqa |
 
 ---
 
 ## Capability benches
 
 Catalog keys: `capability_core` (`gsm8k`, `mmlu`, `humaneval`),  
-`coding_datasets` (`humaneval`, `mbpp`, `humanevalplus`),  
-`capability_datasets` (union of both).
+`coding_datasets` (`humaneval`, `mbpp`, `humanevalplus`, `mbppplus`),  
+`hard_datasets` (`mmlu-pro`, `gpqa`, `math500`),  
+`capability_datasets` (union of all three).
 
 | Bench | Dataset | Kind | Metric |
 |-------|---------|------|--------|
 | `gsm8k` | `openai/gsm8k` | math | Exact number (`#### N`) |
 | `mmlu` | `cais/mmlu` | knowledge | Letter A–D |
+| `mmlu-pro` | `TIGER-Lab/MMLU-Pro` | knowledge | Letter A–J |
+| `gpqa` | `Idavidrein/gpqa@gpqa_diamond` | knowledge | Letter A–D (**gated**) |
+| `math500` | `HuggingFaceH4/MATH-500` | math | Boxed / numeric |
 | `humaneval` | `openai/openai_humaneval` | coding | Unit tests in a subprocess |
 | `mbpp` | `google-research-datasets/mbpp@sanitized` | coding | Assert-list tests in a subprocess |
 | `humanevalplus` | `evalplus/humanevalplus` | coding | Stronger HumanEval+ unit tests |
+| `mbppplus` | `evalplus/mbppplus` | coding | Stronger MBPP+ assert tests |
 
 ### Coding benches (no tool calling)
 
@@ -213,15 +225,18 @@ and runs local unit tests in a subprocess.
 
 | Preset | Benches |
 |--------|---------|
-| `coding` / `coding-smoke` | `humaneval`, `mbpp`, `humanevalplus` |
-| `--datasets humaneval,mbpp` | any mix of capability ids |
+| `coding` / `coding-smoke` | `humaneval`, `mbpp`, `humanevalplus`, `mbppplus` |
+| `hard` / `hard-smoke` | `mmlu-pro`, `gpqa`, `math500` |
+| `--datasets humaneval,mbpp,mmlu-pro` | any mix of capability ids |
 
 ```bash
 refusal-capability-bench --model m --preset coding --limit 25 --report
-refusal-capability-bench --model m --datasets mbpp,humanevalplus --limit 20
+refusal-capability-bench --model m --preset hard --limit 25 --report
+refusal-capability-bench --model m --datasets mbppplus,mmlu-pro,math500 --limit 20
 ```
 
 Same `--seed` + `--limit` ⇒ stable A/B compares.  
 **All coding benches execute model code locally** — sandbox untrusted models.
 
 For uncensor checks: expect **↓ refusal** on `over_refuse`, **↑ or stable** on `should_refuse`, **≈ flat** capability.
+

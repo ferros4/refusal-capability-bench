@@ -18,17 +18,24 @@ log = get_logger(__name__)
 # Core capability pack used by most suite presets
 CAPABILITY_CORE = ("gsm8k", "mmlu", "humaneval")
 # Chat-only coding benches (local unit tests; no tool/function calling)
-CODING_DATASETS = ("humaneval", "mbpp", "humanevalplus")
+CODING_DATASETS = ("humaneval", "mbpp", "humanevalplus", "mbppplus")
+# Harder knowledge/math (same chat + local grade path as core)
+HARD_DATASETS = ("mmlu-pro", "gpqa", "math500")
 # All known capability dataset ids (classification + --list-datasets)
-CAPABILITY_DATASETS = ("gsm8k", "mmlu", "humaneval", "mbpp", "humanevalplus")
+CAPABILITY_DATASETS = CAPABILITY_CORE + CODING_DATASETS[1:] + HARD_DATASETS
 
 CAPABILITY_INFO: dict[str, str] = {
     "gsm8k": "Grade-school math (exact numeric match)",
     "mmlu": "Multiple-choice academic knowledge",
+    "mmlu-pro": "MMLU-Pro 10-way multiple choice",
+    "gpqa": "GPQA Diamond graduate science (4-way MC; gated HF)",
+    "math500": "MATH-500 competition math (boxed answer)",
     "humaneval": "Python function completion (HumanEval unit tests; chat-only)",
     "mbpp": "Mostly Basic Python Problems (assert tests; chat-only)",
     "humanevalplus": "HumanEval+ stronger tests via EvalPlus (chat-only)",
+    "mbppplus": "MBPP+ stronger tests via EvalPlus (chat-only)",
 }
+
 
 @dataclass(frozen=True)
 class SuitePreset:
@@ -144,7 +151,7 @@ SUITE_PRESETS: dict[str, SuitePreset] = {
     ),
     "coding": _p(
         "coding",
-        "Chat-only coding suite: HumanEval, MBPP, HumanEval+ (local unit tests; no tools)",
+        "Chat-only coding suite: HumanEval, MBPP, HumanEval+, MBPP+ (local unit tests; no tools)",
         refusal=(),
         capability=list(CODING_DATASETS),
         recommended=True,
@@ -156,6 +163,21 @@ SUITE_PRESETS: dict[str, SuitePreset] = {
         capability=list(CODING_DATASETS),
         recommended=False,
     ),
+    "hard": _p(
+        "hard",
+        "Harder capability: MMLU-Pro, GPQA Diamond, MATH-500 (chat-only; no tools)",
+        refusal=(),
+        capability=list(HARD_DATASETS),
+        recommended=True,
+    ),
+    "hard-smoke": _p(
+        "hard-smoke",
+        "Hard capability only, intended with a small --limit",
+        refusal=(),
+        capability=list(HARD_DATASETS),
+        recommended=False,
+    ),
+
 }
 
 @dataclass

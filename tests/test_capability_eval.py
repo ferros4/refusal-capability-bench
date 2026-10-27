@@ -164,8 +164,16 @@ def test_score_trial_mbpp_and_humanevalplus():
 def test_coding_benches_registered():
     assert "mbpp" in cap.KNOWN_BENCHES
     assert "humanevalplus" in cap.KNOWN_BENCHES
-    assert cap.CODING_BENCHES == frozenset({"humaneval", "humanevalplus", "mbpp"})
+    assert "mbppplus" in cap.KNOWN_BENCHES
+    assert cap.CODING_BENCHES == frozenset(
+        {"humaneval", "humanevalplus", "mbpp", "mbppplus"}
+    )
     assert cap._resolve_loader("mbpp") is cap.load_mbpp
+    assert cap._resolve_loader("mbppplus") is cap.load_mbppplus
+    assert cap._resolve_loader("mmlu-pro") is cap.load_mmlu_pro
+    assert cap._resolve_loader("gpqa") is cap.load_gpqa
+    assert cap._resolve_loader("math500") is cap.load_math500
+
 
 
 def test_summarize_and_diff(tmp_path: Path):
@@ -310,3 +318,139 @@ def test_load_mbpp_mocked():
         assert samples[0].sample_id == "mbpp-1"
         assert "no tools" in samples[0].prompt
         assert samples[0].gold["test_list"] == ["assert add(1, 2) == 3"]
+
+
+def test_extract_mc_letter_ten_choices():
+    assert cap.extract_mc_letter("The answer is J.", n_choices=10) == "J"
+    assert cap.extract_mc_letter("Answer: (H)", n_choices=10) == "H"
+    assert cap.extract_mc_letter("The answer is J.", n_choices=4) == ""
+
+
+def test_extract_boxed_and_score_math500():
+    assert cap.extract_boxed(r"reason \boxed{42}") == "42"
+    assert cap.extract_boxed(r"\boxed{\frac{1}{2}}") == r"\frac{1}{2}"
+    assert cap.score_math500(r"So \boxed{15}", "15") is True
+    assert cap.score_math500(r"\boxed{1/2}", r"\frac{1}{2}") is True
+    assert cap.score_math500(r"\boxed{3}", "4") is False
+
+
+def test_score_trial_mmlu_pro_gpqa_math500():
+    pro = Sample("mmlu-pro", "1", "p", 9, {"n_choices": 10})
+    ok, pred, gold = cap.score_trial(pro, "Final answer: J")
+    assert ok and pred == "J" and gold == "J"
+
+    gpqa = Sample("gpqa", "1", "p", 1, {"n_choices": 4})
+    ok, pred, gold = cap.score_trial(gpqa, "The answer is B.")
+    assert ok and pred == "B" and gold == "B"
+
+    math_s = Sample("math500", "1", "p", "42")
+    ok, pred, gold = cap.score_trial(math_s, r"working \boxed{42}")
+    assert ok and gold == "42"
+    assert pred == "42"
+
+
+def test_score_trial_mbppplus():
+    sample = Sample(
+        "mbppplus",
+        "1",
+        "p",
+        {"test_list": ["assert add(1, 2) == 3"], "setup": ""},
+    )
+    ok, pred, _ = cap.score_trial(
+        sample, "```python\ndef add(a, b):\n    return a + b\n```"
+    )
+    assert ok is True
+    assert pred == "pass"
+
+
+def test_load_mbppplus_mocked():
+    fake_ds = [
+        {
+            "task_id": 7,
+            "prompt": "Write add.",
+            "test_list": ["assert add(1, 2) == 3"],
+            "test_imports": [],
+        }
+    ]
+
+    def fake_load_dataset(*args, **kwargs):
+        assert args[0] == "evalplus/mbppplus"
+        return fake_ds
+
+    with patch.object(cap, "_require_datasets", return_value=fake_load_dataset):
+        samples = cap.load_mbppplus(limit=1, seed=0)
+        assert samples[0].bench == "mbppplus"
+        assert samples[0].sample_id == "mbppplus-7"
+
+
+def test_load_mmlu_pro_mocked():
+    fake_ds = [
+        {
+            "question_id": 9,
+            "question": "Pick one",
+            "options": [f"opt{i}" for i in range(10)],
+            "answer": "C",
+            "answer_index": 2,
+            "category": "math",
+        }
+    ]
+
+    def fake_load_dataset(*args, **kwargs):
+        assert args[0] == "TIGER-Lab/MMLU-Pro"
+        return fake_ds
+
+    with patch.object(cap, "_require_datasets", return_value=fake_load_dataset):
+        samples = cap.load_mmlu_pro(limit=1, seed=0)
+        assert samples[0].bench == "mmlu-pro"
+        assert samples[0].gold == 2
+        assert samples[0].meta["n_choices"] == 10
+        assert "A, B, C, D, E, F, G, H, I, J" in samples[0].prompt
+
+
+def test_load_gpqa_mocked():
+    fake_ds = [
+        {
+            "Record ID": "rec1",
+            "Question": "What is X?",
+            "Correct Answer": "right",
+            "Incorrect Answer 1": "w1",
+            "Incorrect Answer 2": "w2",
+            "Incorrect Answer 3": "w3",
+            "Subdomain": "Physics",
+        }
+    ]
+
+    def fake_load_dataset(name, config=None, split=None):
+        assert name == "Idavidrein/gpqa"
+        assert config == "gpqa_diamond"
+        return fake_ds
+
+    with patch.object(cap, "_require_datasets", return_value=fake_load_dataset):
+        samples = cap.load_gpqa(limit=1, seed=0)
+        assert samples[0].bench == "gpqa"
+        assert samples[0].gold in {0, 1, 2, 3}
+        assert samples[0].meta["choices"][samples[0].gold] == "right"
+
+
+def test_load_math500_mocked():
+    fake_ds = [
+        {
+            "problem": "1+1",
+            "solution": r"\boxed{2}",
+            "answer": "2",
+            "subject": "Algebra",
+            "level": 1,
+            "unique_id": "test/algebra/1.json",
+        }
+    ]
+
+    def fake_load_dataset(*args, **kwargs):
+        assert args[0] == "HuggingFaceH4/MATH-500"
+        return fake_ds
+
+    with patch.object(cap, "_require_datasets", return_value=fake_load_dataset):
+        samples = cap.load_math500(limit=1, seed=0)
+        assert samples[0].bench == "math500"
+        assert samples[0].gold == "2"
+        assert r"\boxed{}" in samples[0].prompt
+

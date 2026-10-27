@@ -5,7 +5,8 @@ Evaluate local / LAN LLMs over an **OpenAI-compatible API** (Ollama, llama.cpp, 
 | Suite | Measures |
 |-------|----------|
 | **Refusal** | How often the model declines prompts |
-| **Capability** | Core skills (GSM8K, MMLU) + coding (HumanEval, MBPP, HumanEval+; chat-only, no tools) |
+| **Capability** | Core (GSM8K, MMLU) + hard (MMLU-Pro, GPQA, MATH-500) + coding (HumanEval, MBPP, +plus; chat-only, no tools) |
+
 
 Default API (when `--base-url` is omitted): `http://127.0.0.1:11434/v1`  
 (`--host` / `--port`, port default **11434**)

@@ -62,6 +62,16 @@ def test_resolve_preset_coding():
     assert "humanevalplus" in suite.capability
 
 
+
+def test_resolve_preset_hard():
+    suite = presets.resolve_suite(preset="hard", datasets=None)
+    assert suite.refusal == []
+    assert suite.capability == list(presets.HARD_DATASETS)
+    assert suite.only == "capability"
+    for dataset_id in presets.HARD_DATASETS:
+        assert presets.classify_dataset_token(dataset_id) == "capability"
+
+
 def test_coding_datasets_are_capability():
     for dataset_id in presets.CODING_DATASETS:
         assert presets.classify_dataset_token(dataset_id) == "capability"
@@ -142,7 +152,9 @@ def test_resolve_suite_multi_merges_and_dedupes():
         "humaneval",
         "mbpp",
         "humanevalplus",
+        "mbppplus",
     ]
+
     assert cyber_coding.capability.count("humaneval") == 1
 
 
@@ -175,10 +187,13 @@ def test_catalog_yaml_documents_single_suite_presets():
     assert sp["capability-only"]["capability"] == ["gsm8k", "mmlu", "humaneval"]
 
     assert sp["coding"]["refusal"] == []
-    assert sp["coding"]["capability"] == ["humaneval", "mbpp", "humanevalplus"]
-    assert catalog["coding_datasets"] == ["humaneval", "mbpp", "humanevalplus"]
+    assert sp["coding"]["capability"] == ["humaneval", "mbpp", "humanevalplus", "mbppplus"]
+    assert catalog["coding_datasets"] == ["humaneval", "mbpp", "humanevalplus", "mbppplus"]
     assert "mbpp" in catalog["capability_datasets"]
     assert "humanevalplus" in catalog["capability_datasets"]
+    assert "mbppplus" in catalog["capability_datasets"]
+    assert catalog["hard_datasets"] == ["mmlu-pro", "gpqa", "math500"]
+
 
     # Code and catalog agree on the intentional empty-side presets
     code_ref = presets.resolve_suite(preset="refusal-only", datasets=None)

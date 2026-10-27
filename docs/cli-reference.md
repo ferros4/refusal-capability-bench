@@ -166,9 +166,10 @@ python -m harness.capability_eval \
   --out results/manual/capability
 
 python -m harness.capability_eval \
-  --model m --benches humaneval,mbpp,humanevalplus \
+  --model m --benches humaneval,mbpp,humanevalplus,mbppplus \
   --limit 25 --seed 42 \
   --out results/manual/coding
+
 ```
 
 Defaults if `--out` omitted: `results/refusal_run` and `results/capability_run`.
